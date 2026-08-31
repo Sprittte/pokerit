@@ -623,6 +623,7 @@ class GameSession:
             hand_num=self._hand_num,
             hero_hole=self._hero_hole,
             board=self._board,
+            action_histories=self._action_histories,
             hero_hole_override=hero_hole_override,
             community_override=community_override,
         )
@@ -733,6 +734,25 @@ class GameSession:
         action, amount = self._validate_action(action, amount)
         self._apply_action(action, amount, actor_pk=self._hero_pk_index)
         return self._advance_gen()
+
+    def finish_early(self) -> list[dict]:
+        """End the session cleanly without persisting an unfinished hand.
+
+        Completed hands have already updated ``self._stacks`` and are buffered
+        by the recorder. The active PokerKit state only contains transient
+        actions from the unfinished hand, so dropping it restores the last
+        completed-hand stacks and lets the normal persistence path close the
+        game without manufacturing a partial hand history.
+        """
+        if self.finished:
+            return []
+        self.finished = True
+        self._pending_ask = None
+        self._state = None
+        return [
+            {"name": self.config.seats[index].name, "stack": self._stacks[index]}
+            for index in range(len(self.config.seats))
+        ]
 
     # -- persistence ---------------------------------------------------------
 

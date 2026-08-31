@@ -27,7 +27,7 @@ from poker_engine.db.models import (
     Hand,
     User,
 )
-from poker_engine.stats import _sum_hands, to_display
+from poker_engine.stats import _sum_hands, preflop_event_evidence, to_display
 
 from ai_functions.game_review import config
 from ai_functions.game_review.leak_taxonomy import (
@@ -36,6 +36,7 @@ from ai_functions.game_review.leak_taxonomy import (
     threshold_profile_key_for_game,
 )
 from ai_functions.game_review.merge import merge_findings
+from ai_functions.game_review.preflop_findings import detect_rfi_limp_findings
 from ai_functions.game_review.session_dynamics import compute_session_dynamics
 from ai_functions.game_review.street_agent import BATCH_SIZE, STREETS, run_batch
 from ai_functions.game_review.synthesis import run_synthesis
@@ -95,6 +96,7 @@ def _ensure_batches_created(db, evaluation: GameEvaluation, game: Game, hands: l
     hero_gp_id = _hero_gp_id(game)
     threshold_profile = get_threshold_profile(threshold_profile_key_for_game(game))
     game_level = to_display(_sum_hands(hands, hero_gp_id))
+    game_level["preflop_events"] = preflop_event_evidence(hands, hero_gp_id)
     stats_snapshot = {
         "evaluation_kind": "current_game",
         "game_level": game_level,
@@ -262,6 +264,11 @@ async def run_evaluation(ctx, evaluation_id: str) -> None:
             return
 
         street_findings = _collect_street_findings(db, evaluation_id)
+        game, hands = _load_game_with_hands(db, evaluation.game_id)
+        hero_gp_id = _hero_gp_id(game)
+        street_findings.setdefault("preflop", []).extend(
+            detect_rfi_limp_findings(game, hands, hero_gp_id)
+        )
         threshold_meta = evaluation.stats_snapshot.get("threshold_profile") or {}
         threshold_profile = get_threshold_profile(threshold_meta.get("key"))
         leak_tags = merge_findings(
@@ -273,7 +280,6 @@ async def run_evaluation(ctx, evaluation_id: str) -> None:
         evaluation.current_stage = "synthesis"
         db.commit()
 
-        game, _ = _load_game_with_hands(db, evaluation.game_id)
         user = db.get(User, evaluation.user_id)
 
         # Read BEFORE this evaluation folds itself in, so its own result

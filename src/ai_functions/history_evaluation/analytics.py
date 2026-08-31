@@ -27,7 +27,7 @@ class MetricSpec:
 METRICS = (
     MetricSpec("vpip", ("vpip",), "pct", MIN_OPPORTUNITY_FLOOR, ("low_vpip", "high_vpip")),
     MetricSpec("pfr", ("pfr",), "pct", MIN_OPPORTUNITY_FLOOR, ("limps_too_wide",)),
-    MetricSpec("limp", ("limp",), "pct", MIN_OPPORTUNITY_FLOOR, ("limps_too_wide",)),
+    MetricSpec("open_limp", ("open_limp",), "pct", MIN_OPPORTUNITY_FLOOR, ("limps_too_wide",)),
     MetricSpec("three_bet", ("three_bet",), "pct", MIN_OPPORTUNITY_FLOOR, ("under_3bet", "over_3bet")),
     MetricSpec("fold_to_3bet", ("fold_to_3bet",), "pct", MIN_OPPORTUNITY_FLOOR, ("overfolds_to_3bet",)),
     MetricSpec("aggression_factor", ("aggression_factor",), "ratio", MIN_OPPORTUNITY_FLOOR,
@@ -113,7 +113,7 @@ def _value(node: dict, spec: MetricSpec):
 
 
 def _distance_to_healthy(value: float, spec: MetricSpec, profile: ThresholdProfile) -> float:
-    if spec.metric == "limp":
+    if spec.metric == "open_limp":
         return max(0.0, value - profile.gap_moderate)
     if spec.metric == "positional_gap":
         return max(0.0, profile.positional_moderate - value)

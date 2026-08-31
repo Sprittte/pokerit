@@ -18,6 +18,29 @@ from shared_services.hand_formatter import pos_label as _pos_label
 _STREET_NAMES = {0: "preflop", 1: "flop", 2: "turn", 3: "river"}
 
 
+def last_actions_for_street(
+    action_histories: dict[str, list[dict]] | None,
+    street: str,
+) -> dict[str, dict]:
+    """Return each player's latest public action on the current street.
+
+    The browser receives only the current street's transient action badge.
+    Fold and all-in persistence is derived from the seat state, so stale calls
+    and raises disappear automatically when a new street begins.
+    """
+    latest: dict[str, dict] = {}
+    for entry in (action_histories or {}).get(street, []):
+        uuid_ = str(entry.get("uuid", ""))
+        action = str(entry.get("action", "")).upper()
+        if not uuid_ or not action:
+            continue
+        latest[uuid_] = {
+            "action": action,
+            "amount": int(entry.get("amount") or 0),
+        }
+    return latest
+
+
 def build_view(
     *,
     config: GameConfig,
@@ -36,6 +59,7 @@ def build_view(
     hand_num: int,
     hero_hole: list[str],
     board: list[str],
+    action_histories: dict[str, list[dict]] | None = None,
     hero_hole_override: list[str] | None = None,
     community_override: list[str] | None = None,
 ) -> dict:
@@ -43,6 +67,8 @@ def build_view(
     n = len(config.seats)
     hero_hole = hero_hole_override if hero_hole_override is not None else hero_hole
     community = community_override if community_override is not None else board
+    street = _STREET_NAMES.get(current_street_index, "preflop")
+    last_actions = last_actions_for_street(action_histories, street)
 
     if state is not None:
         stacks_view = [state.stacks[seat_to_pk[i]] if seat_to_pk[i] >= 0 else stacks[i] for i in range(n)]
@@ -95,6 +121,7 @@ def build_view(
             "is_bb": i == bb_pos,
             "position": seat_pos,
             "hole_cards": hero_hole if is_hero else None,
+            "last_action": last_actions.get(uuid_),
         })
 
     actor_seat = None
@@ -102,7 +129,7 @@ def build_view(
         actor_seat = pk_to_seat[state.actor_index]
 
     return {
-        "street": _STREET_NAMES.get(current_street_index, "preflop"),
+        "street": street,
         "community_card": list(community),
         "pot": pot_with_uuids,
         "dealer_btn": btn_pos,

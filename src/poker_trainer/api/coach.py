@@ -158,9 +158,19 @@ async def coach_chat(
             scenario_context = build_scenario_context(session.config)
             round_state = session.current_round_state(for_coach=True)
             if round_state is not None:
-                table_text = format_table(round_state, session.hero_uuid)
+                pending_ask = session.pending_ask()
+                valid_actions = (
+                    pending_ask.get("valid_actions") if pending_ask is not None else None
+                )
+                table_text = format_table(
+                    round_state,
+                    session.hero_uuid,
+                    valid_actions=valid_actions,
+                )
                 live_context = (
-                    "Decision Snapshot (current state; no future actions or run-out):\n\n"
+                    "Decision Snapshot (authoritative current hand; no future actions or run-out):\n"
+                    "Use this hand for questions such as 'this hand', 'now', or 'what should I do'. "
+                    "Do not import cards, board, actions, or pot sizes from earlier hands.\n\n"
                     f"{table_text}"
                 )
         else:

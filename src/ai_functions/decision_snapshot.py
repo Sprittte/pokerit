@@ -78,14 +78,27 @@ def build_decision_snapshots(game: Game, hand: Hand, hero_gp_id, street: str) ->
                 "styles": styles,
             })
 
-        # The first voluntary preflop decision can use an exact RFI chart pack
-        # only when format, live player count, ante and stack all match.
-        voluntary_before = [a for a in prior if a.get("action") not in {"smallblind", "bigblind", "ante"}]
-        if street == "preflop" and not voluntary_before and hero_hand:
+        # An unopened first-in preflop decision can use an exact RFI chart pack
+        # only when format, live player count, ante and stack all match. Folds
+        # before the hero do not close the RFI node; a positive call or raise
+        # does. This intentionally fixes late-position RFI evidence, which the
+        # old "any prior action" check accidentally limited to UTG.
+        entered_before = any(
+            a.get("action") == "raise"
+            or (a.get("action") == "call" and (a.get("amount") or 0) > 0)
+            for a in prior
+        )
+        if street == "preflop" and not entered_before and hero_hand:
             pack = get_range_pack(_matching_pack_id(game, hand, hero_stack_bb) or "")
             decision = pack.decision(hero.get("position", ""), hero_hand) if pack else None
             if decision:
-                evidence_sources.append(decision.evidence_source)
+                evidence_sources.append({
+                    **decision.evidence_source,
+                    "hand_class": decision.hand,
+                    "position": decision.position,
+                    "acceptable_actions": list(decision.actions),
+                    "mixed": decision.mixed,
+                })
 
         snapshot = {
             "schema_version": SCHEMA_VERSION,

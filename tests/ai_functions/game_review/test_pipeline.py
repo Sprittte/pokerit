@@ -169,13 +169,13 @@ def test_run_evaluation_completes_end_to_end(db_session, monkeypatch):
         "report_kind": "current_game_observation",
         "threshold_profile": {
             "key": "cash_6max_100bb",
-            "version": "2026-07-23.v3",
+            "version": "2026-08-31.v6",
         },
     }
     assert evaluation.stats_snapshot["game_level"]["hands_dealt"] == 2
     assert evaluation.stats_snapshot["sample_status"]["metrics"]
     assert evaluation.model_versions["stat_threshold_profile"] == "cash_6max_100bb"
-    assert evaluation.model_versions["stat_threshold_version"] == "2026-07-23.v3"
+    assert evaluation.model_versions["stat_threshold_version"] == "2026-08-31.v6"
     assert evaluation.folded_at is not None
 
     profile = db.get(PlayerProfile, (user.id, "cash_6max_100bb"))
@@ -311,7 +311,12 @@ def test_second_evaluation_reports_returning_leak_and_profile_confirms(db_sessio
     db.refresh(eval_a)
 
     async def _fake_street_reports_missed_fold(**kwargs):
-        findings = [{"tag": "missed_fold", "round_count": 0, "note": "clear missed fold"}]
+        findings = [{
+            "tag": "missed_fold", "round_count": 0,
+            "hero_action": "called", "issue": "range is too weak",
+            "better_line": "fold", "why": "folding avoids a dominated continue",
+            "confidence": "high",
+        }]
         return StreamResult(text=json.dumps(findings), usage=TokenUsage())
 
     monkeypatch.setattr(

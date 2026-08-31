@@ -107,11 +107,13 @@ defined as `(postflop bets + raises) / postflop calls`.
 ### Leak thresholds and sample handling
 
 Leak thresholds are centralized, scenario-specific, and versioned. The current
-development profile is `2026-07-23.v3` and uses a deliberately permissive
-minimum of five relevant opportunities for each deterministic metric. Below
-that floor the UI shows `insufficient sample` and code emits no statistical
-leak. Findings that clear five opportunities should still be interpreted as
-early signals, not settled long-term conclusions.
+development profile is `2026-08-31.v6`. Most deterministic metrics use a
+deliberately permissive minimum of five relevant opportunities; VPIP leak tags
+require at least 50 supported hands and use hands-weighted references when a
+session spans multiple table sizes. Below a metric's floor the UI shows
+`insufficient sample` and code emits no statistical leak. Findings that clear a
+floor should still be interpreted as session signals, not settled long-term or
+player-pool conclusions.
 
 The 15BB Push/Fold profile disables postflop statistical leak tags and instead
 prioritizes descriptive open-shove, reshove, and call-off statistics plus

@@ -81,7 +81,7 @@ class CreateGameRequest(BaseModel):
     small_blind: int = Field(default=50, ge=1)
     big_blind: int = Field(default=100, ge=2)
     buy_in: int = Field(default=10000, ge=1)
-    max_round: int = Field(default=50, ge=1, le=500)
+    max_round: int = Field(default=50, ge=1, le=100)
     scenario: str = CUSTOM_SCENARIO
     game_format: str = "cash"
     ante: int = Field(default=0, ge=0)

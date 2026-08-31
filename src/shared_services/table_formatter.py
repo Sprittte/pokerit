@@ -40,7 +40,39 @@ def _action_line(
     return f"{who} {action}" + (f" {amt}" if amt else "")
 
 
-def format_table(round_state: dict, hero_uuid: str) -> str:
+def _decision_lines(valid_actions: list[dict] | None) -> list[str]:
+    if not valid_actions:
+        return []
+    labels: list[str] = []
+    to_call: int | None = None
+    for item in valid_actions:
+        action = str(item.get("action") or "").lower()
+        amount = item.get("amount")
+        if action == "fold":
+            labels.append("fold")
+        elif action == "call":
+            call_amount = int(amount or 0)
+            to_call = call_amount
+            labels.append("check" if call_amount == 0 else f"call {call_amount}")
+        elif action == "raise" and isinstance(amount, dict):
+            lo, hi = amount.get("min"), amount.get("max")
+            if lo is not None and hi is not None and lo >= 0 and hi >= 0:
+                labels.append(f"raise to {lo}\u2013{hi}")
+        elif action:
+            labels.append(action)
+    lines = []
+    if to_call is not None:
+        lines.append(f"To call: {to_call}")
+    if labels:
+        lines.append("Legal actions: " + "; ".join(labels))
+    return lines
+
+
+def format_table(
+    round_state: dict,
+    hero_uuid: str,
+    valid_actions: list[dict] | None = None,
+) -> str:
     """Return a compact text summary of the current live table state for coach context.
 
     `round_state` is the dict produced by session._build_round_state_dict, which
@@ -57,6 +89,7 @@ def format_table(round_state: dict, hero_uuid: str) -> str:
     ante_type = round_state.get("ante_type", "none")
     tournament_stage = round_state.get("tournament_stage")
     street = round_state.get("street", "preflop")
+    street_labels = {"preflop": "Preflop", "flop": "Flop", "turn": "Turn", "river": "River"}
     community = round_state.get("community_card", [])
     pot = round_state.get("pot", {})
     seats: list[dict] = round_state.get("seats", [])
@@ -85,6 +118,10 @@ def format_table(round_state: dict, hero_uuid: str) -> str:
     if tournament_stage:
         context += f"; Stage: {tournament_stage}"
     lines.append(context)
+    round_count = round_state.get("round_count")
+    if round_count is not None:
+        lines.append(f"Current hand: #{round_count}")
+    lines.append(f"Street: {street_labels.get(street, street)}")
 
     pos_str = f" ({hero_pos})" if hero_pos else ""
     if hero_cards:
@@ -127,12 +164,24 @@ def format_table(round_state: dict, hero_uuid: str) -> str:
     if community:
         lines.append(f"Board: {_cards(community)}")
 
+    next_player = round_state.get("next_player")
+    actor_uuid = None
+    if isinstance(next_player, int) and 0 <= next_player < len(seats):
+        actor_uuid = seats[next_player].get("uuid")
+    if actor_uuid:
+        actor_base = "Player" if actor_uuid == hero_uuid else seat_names.get(actor_uuid, actor_uuid)
+        actor_pos = seat_positions.get(actor_uuid, "")
+        actor = f"{actor_base} ({actor_pos})" if actor_pos else actor_base
+        lines.append(f"Current actor: {actor}")
+        lines.append(f"Player to act now: {'yes' if actor_uuid == hero_uuid else 'no'}")
+        if actor_uuid == hero_uuid:
+            lines.extend(_decision_lines(valid_actions))
+
     lines.append("")
 
     # Action histories by street
     action_histories: dict[str, list[dict]] = round_state.get("action_histories", {})
     street_order = ["preflop", "flop", "turn", "river"]
-    street_labels = {"preflop": "Preflop", "flop": "Flop", "turn": "Turn", "river": "River"}
 
     for st in street_order:
         actions = action_histories.get(st, [])
@@ -142,10 +191,6 @@ def format_table(round_state: dict, hero_uuid: str) -> str:
         for a in actions:
             lines.append(_action_line(a, seat_names, seat_positions, seat_styles, hero_uuid))
         lines.append("")
-
-    # Current street indicator (if no actions recorded yet for it)
-    if not action_histories.get(street):
-        lines.append(f"Currently on: {street_labels.get(street, street)}")
 
     if seat_styles:
         lines.append(

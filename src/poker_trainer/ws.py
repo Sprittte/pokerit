@@ -101,7 +101,23 @@ async def play(websocket: WebSocket, game_id: str) -> None:
 
         while True:
             msg = await websocket.receive_json()
-            if msg.get("type") != "action":
+            message_type = msg.get("type")
+            if message_type == "end_game":
+                async with lock:
+                    if session.finished:
+                        break
+                    final_players = session.finish_early()
+                    await websocket.send_json({
+                        "type": "event",
+                        "event": {
+                            "type": "game_finish",
+                            "players": final_players,
+                            "reason": "ended_by_player",
+                        },
+                    })
+                    await _finish(websocket, session, game_id)
+                break
+            if message_type != "action":
                 continue
             action = msg.get("action", "call")
             amount = int(msg.get("amount", 0) or 0)

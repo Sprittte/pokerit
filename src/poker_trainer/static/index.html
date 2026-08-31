@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Poker Trainer</title>
-  <link rel="stylesheet" href="/static/css/styles.css?v=9" />
+  <link rel="stylesheet" href="/static/css/styles.css?v=14" />
 </head>
 <body>
   <div id="app"></div>
@@ -122,7 +122,7 @@
             <input id="cfg-ante" type="number" min="0" value="0" />
           </label>
           <label>Max hands
-            <input id="cfg-rounds" type="number" min="1" max="500" value="50" />
+            <input id="cfg-rounds" type="number" min="1" max="100" value="50" />
           </label>
           <div class="toggles">
             <label class="toggle">
@@ -368,10 +368,13 @@
           <span id="table-blinds"></span>
           <span id="table-hand"></span>
         </div>
-        <button id="toggle-panel" class="topbar-coach-btn" title="Coach">
-          <img src="/static/assets/ai_coach_icon.png" class="topbar-coach-icon" alt=""/>
-          AI Coach
-        </button>
+        <div class="topbar-actions">
+          <button id="end-game-btn" class="topbar-end-btn" type="button">End game</button>
+          <button id="toggle-panel" class="topbar-coach-btn" title="Coach">
+            <img src="/static/assets/ai_coach_icon.png" class="topbar-coach-icon" alt=""/>
+            AI Coach
+          </button>
+        </div>
       </header>
 
       <div class="table-layout">
@@ -379,9 +382,11 @@
           <div class="felt-stage">
             <div id="felt" class="felt">
               <div id="community" class="community"></div>
-              <div id="pot" class="pot"></div>
               <div id="seats" class="seats"></div>
-              <div id="message" class="table-message"></div>
+              <div class="table-center-status" aria-live="polite">
+                <div id="message" class="table-message"></div>
+                <div id="pot" class="pot"></div>
+              </div>
             </div>
           </div>
 
@@ -396,9 +401,15 @@
                    with All-in always appended. -->
             </div>
             <div class="action-row">
-              <button id="btn-fold" class="btn danger" disabled>Fold</button>
-              <button id="btn-call" class="btn primary" disabled>Call</button>
-              <button id="btn-raise" class="btn warn" disabled>Raise</button>
+              <button id="btn-fold" class="btn danger" disabled><kbd>F</kbd><span>Fold</span></button>
+              <button id="btn-call" class="btn primary" disabled><kbd>C</kbd><span>Call</span></button>
+              <button id="btn-raise" class="btn warn" disabled><kbd>R</kbd><span>Raise</span></button>
+            </div>
+            <div class="shortcut-guide" aria-label="Keyboard shortcuts">
+              <span><kbd>1–4</kbd> Select size</span>
+              <span><kbd>R</kbd> Bet/Raise</span>
+              <span><kbd>C</kbd> Check/Call</span>
+              <span><kbd>F</kbd> Fold</span>
             </div>
           </div>
         </div>
@@ -428,7 +439,7 @@
     </section>
   </template>
 
-  <script src="/static/js/table.js?v=9"></script>
-  <script src="/static/js/app.js?v=9"></script>
+  <script src="/static/js/table.js?v=18"></script>
+  <script src="/static/js/app.js?v=12"></script>
 </body>
 </html>

@@ -15,6 +15,7 @@ Reduction strategy (10k-token budget):
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import AsyncIterator
 
@@ -28,6 +29,9 @@ SHORT_TERM_PAIRS = 5          # keep at most 5 user/assistant pairs
 MODEL = "gpt-5.4-mini"
 MAX_REPLY_TOKENS = 2048
 TEMPERATURE = 1
+
+_HAN_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
+_LATIN_RE = re.compile(r"[A-Za-z]")
 
 CORE_COACH_PROMPT = """# Role and objective
 You are an expert No-Limit Hold'em coach for cash games and tournaments. Improve
@@ -118,6 +122,53 @@ IN_GAME_COACH_PROMPT = _coach_prompt(IN_GAME_TASK_PROMPT)
 GENERAL_COACH_PROMPT = _coach_prompt(GENERAL_COACH_TASK_PROMPT)
 
 
+def _explicit_user_language(text: str) -> str | None:
+    """Return a clear language signal from one user message, if present.
+
+    Chinese poker questions commonly mix English terms such as ``3-bet`` or
+    ``opener`` into an otherwise Chinese sentence. Any Han character is
+    therefore a stronger signal than the presence of Latin characters.
+    """
+    if _HAN_RE.search(text):
+        return "Chinese"
+    if _LATIN_RE.search(text):
+        return "English"
+    return None
+
+
+def _resolve_response_language(user_text: str, history: list[Message]) -> str:
+    """Resolve this turn's language from user messages only.
+
+    An explicit current-message signal always wins. Punctuation/numeric-only
+    follow-ups inherit the most recent clear user language; assistant replies
+    are deliberately ignored so the model cannot lock itself into its previous
+    output language.
+    """
+    current = _explicit_user_language(user_text)
+    if current:
+        return current
+    for message in reversed(history):
+        if message.role != "user":
+            continue
+        previous = _explicit_user_language(message.content)
+        if previous:
+            return previous
+    return "English"
+
+
+def _language_instruction(language: str) -> str:
+    if language == "Chinese":
+        return (
+            "Response language for this turn: Chinese. Reply in Chinese and match "
+            "the user's script; standard poker terms may remain in English. Do not "
+            "copy the language of prior assistant replies."
+        )
+    return (
+        "Response language for this turn: English. Reply in English even if prior "
+        "assistant replies used another language."
+    )
+
+
 def build_scenario_context(source) -> str:
     """Build a stable system block from a live GameConfig or persisted Game."""
     game_format = getattr(source, "game_format", "cash") or "cash"
@@ -179,6 +230,7 @@ def _build_messages(
     conv_pair: int = SHORT_TERM_PAIRS,
     system_prompt: str = HAND_REVIEW_PROMPT,
     scenario_context: str | None = None,
+    language_context: str | None = None,
 ) -> list[dict]:
     """Assemble the OpenAI messages list with a trimmed history window.
 
@@ -190,6 +242,9 @@ def _build_messages(
     every turn — use it for mutable state like the current table snapshot.
     """
     msgs: list[dict] = [{"role": "system", "content": system_prompt}]
+
+    if language_context:
+        msgs.append({"role": "system", "content": language_context})
 
     if scenario_context:
         msgs.append({"role": "system", "content": scenario_context})
@@ -257,6 +312,12 @@ async def chat(
     else:
         system_prompt = GENERAL_COACH_PROMPT
 
+    language_context = None
+    if coach_scenario == "in_game":
+        language_context = _language_instruction(
+            _resolve_response_language(user_text, history)
+        )
+
     msgs = _build_messages(
         history,
         user_text,
@@ -265,6 +326,7 @@ async def chat(
         conv_pair,
         system_prompt,
         scenario_context,
+        language_context,
     )
 
     # Persist user message before streaming so it is visible even if streaming

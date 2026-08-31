@@ -7,6 +7,7 @@ from ai_functions.coach_engine.engine import (
     IN_GAME_COACH_PROMPT,
     MAX_REPLY_TOKENS,
     _build_messages,
+    _resolve_response_language,
     build_scenario_context,
 )
 from shared_services.table_formatter import format_table
@@ -48,6 +49,26 @@ def test_message_layers_keep_authoritative_context_before_user_history():
     ]
 
 
+def test_in_game_language_follows_current_explicit_user_message():
+    history = [
+        SimpleNamespace(role="user", content="这里怎么打"),
+        SimpleNamespace(role="assistant", content="中文回答"),
+    ]
+
+    assert _resolve_response_language("Should I fold here?", history) == "English"
+    assert _resolve_response_language("opener挺松，能不能3-bet？", history) == "Chinese"
+
+
+def test_ambiguous_language_uses_last_clear_user_message_not_assistant():
+    history = [
+        SimpleNamespace(role="user", content="Please analyze this hand"),
+        SimpleNamespace(role="assistant", content="这是助手的中文回答"),
+        SimpleNamespace(role="user", content="2400/2100...?"),
+    ]
+
+    assert _resolve_response_language("...?", history) == "English"
+
+
 def test_scenario_context_distinguishes_starting_from_current_stack():
     source = SimpleNamespace(
         game_format="tournament",
@@ -74,6 +95,8 @@ def test_live_table_expresses_remaining_stacks_in_chips_and_bb():
         "small_blind_amount": 50,
         "big_blind_amount": 100,
         "street": "preflop",
+        "round_count": 12,
+        "next_player": 0,
         "seats": [
             {"uuid": "hero", "name": "Hero", "stack": 2350, "state": "participating"},
             {"uuid": "villain", "name": "Villain", "stack": 1800, "state": "participating"},
@@ -83,7 +106,21 @@ def test_live_table_expresses_remaining_stacks_in_chips_and_bb():
         "action_histories": {},
     }
 
-    table = format_table(round_state, "hero")
+    table = format_table(
+        round_state,
+        "hero",
+        valid_actions=[
+            {"action": "fold", "amount": 0},
+            {"action": "call", "amount": 100},
+            {"action": "raise", "amount": {"min": 200, "max": 2350}},
+        ],
+    )
 
     assert "Player (BTN): 2350 (23.5 BB behind)" in table
     assert "Villain (BB): 1800 (18.0 BB behind)" in table
+    assert "Current hand: #12" in table
+    assert "Street: Preflop" in table
+    assert "Current actor: Player (BTN)" in table
+    assert "Player to act now: yes" in table
+    assert "To call: 100" in table
+    assert "Legal actions: fold; call 100; raise to 200–2350" in table

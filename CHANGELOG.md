@@ -6,6 +6,72 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Added an in-table End game action that saves every completed hand, discards
+  only the active unfinished hand, and closes the game cleanly.
+- Added visible `F`, `C`, `R`, and `1`-`4` table shortcuts. Keyboard raises are
+  armed only after the player selects a preset or edits the amount.
+- Added current-street opponent action badges for fold, check, call, raise, and
+  all-in, plus dedicated UI rows for open-limp, over-limp, SB-complete, squeeze,
+  and limp-reraise statistics.
+- Added deterministic RFI findings for unsupported first-in limps, including
+  exact range-pack actions and auditable hand-level preflop evidence.
+- Added regression coverage for early game termination, game-length limits,
+  table action serialization, preflop classification, coach context/language,
+  VPIP sampling, evidence wording, and evaluation synthesis.
+
+### Changed
+
+- Split total limps into non-SB open limps, over-limps, and SB completions;
+  only non-SB open limps feed the `limps_too_wide` frequency tag and rolling
+  history comparison.
+- Defined standard 3-bet opportunities as the hero's first voluntary decision
+  facing exactly one raise, with squeeze and limp-reraise decisions tracked and
+  explained separately.
+- Versioned the revised statistics and coaching rules as `2026-08-31.v6`.
+  Most deterministic metrics retain a five-opportunity floor, while VPIP leak
+  tags now require at least 50 supported hands.
+- Changed mixed-table-size VPIP evaluation to use hands-weighted 6-max/8-max
+  reference bounds instead of letting one short, extreme segment represent the
+  whole game. Unsupported short-handed segments remain descriptive only.
+- Kept new games at a 50-hand default while allowing sessions up to 100 hands,
+  with judgment severity normalized to a 50-hand exposure so longer sessions
+  do not become artificially harsher.
+- Kept full hand-level evaluation evidence for audit while limiting synthesis
+  prompts to five deterministic, timeline-spread representative citations.
+- Changed the in-game coach to follow the language of the current user message;
+  ambiguous follow-ups inherit only the latest clear user language and ignore
+  the language of prior assistant replies.
+- Started a fresh model conversation for every new hand while preserving the
+  visible coach transcript, preventing cards and conclusions from an older hand
+  from leaking into the current decision.
+- Expanded live coach context with an authoritative decision snapshot containing
+  hand number, street, current actor, hero-to-act state, call amount, and legal
+  fold/call/raise bounds.
+- Replaced internal evidence identifiers with direct UI labels such as
+  `Recorded hand`, `Exact math`, `Recorded stats`, `AI strategy judgment`, and
+  `Bot preset style`, displayed under `Based on` with explanatory tooltips.
+- Reworked table seats into direction-aware pods with dedicated chip lanes and
+  compact density tiers so seats, cards, bets, center status, and controls stay
+  clear across common viewport sizes while preserving opponent style tags.
+- Removed the unused local Ollama services, model-pull job, volume, environment
+  variable, and app/worker dependency from the Docker Compose development stack.
+
+### Fixed
+
+- Fixed RFI range-pack matching after players fold before the hero, so supported
+  late-position first-in decisions are no longer incorrectly limited to UTG.
+- Fixed preflop coaching narratives so SB completes and over-limps cannot be
+  presented as open-limp leaks, and limp-reraises cannot inflate standard
+  3-bet opportunities.
+- Fixed VPIP report wording to distinguish overall and table-size segment rates,
+  describe severity-2 results cautiously, and avoid unsupported player-pool
+  claims.
+- Fixed stale table action display by resetting transient action badges on each
+  new street, and bumped static asset versions so the updated UI is not hidden
+  behind an older browser cache.
+
 ## [0.2.0] - 2026-07-29
 
 ### Highlights

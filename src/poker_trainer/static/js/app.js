@@ -7,6 +7,31 @@
   // fetched profile object for instant header rendering.
   const state = { user: null, bootstrapped: false };
 
+  const EVIDENCE_TYPE_LABELS = {
+    engine_state: "Recorded hand",
+    deterministic_calculation: "Exact math",
+    deterministic_statistics: "Recorded stats",
+    heuristic_inference: "AI strategy judgment",
+    simulation_metadata: "Bot preset style",
+    range_knowledge_base: "Preflop range chart",
+    solver_node: "Solver result",
+  };
+
+  function evidenceSourceChip(source) {
+    const type = source.type || "unknown";
+    const fallback = titleCase(type.replace(/_/g, " "));
+    const label = EVIDENCE_TYPE_LABELS[type] || fallback;
+    const suffix = source.pack_id ? ` · ${source.pack_id}` : "";
+    const detail = source.label || label;
+    return `<span class="eval-evidence-chip" title="${escapeHTML(detail)}">` +
+      `${escapeHTML(label + suffix)}</span>`;
+  }
+
+  function evidenceSourceList(sources) {
+    return (sources || []).map(evidenceSourceChip)
+      .join('<span class="eval-evidence-separator" aria-hidden="true">·</span>');
+  }
+
   function screen(id) {
     const tpl = document.getElementById("screen-" + id);
     app.innerHTML = "";
@@ -304,6 +329,10 @@
     if (isDiscarded) {
       html += `<div class="eval-discarded-banner"><span>This evaluation is discarded and excluded from your coaching profile.</span></div>`;
     }
+    const gameHands = (((full.stats_snapshot || {}).game_level || {}).hands_dealt);
+    if (gameHands !== undefined && gameHands !== null) {
+      html += `<div class="eval-threshold-meta">Current game · ${gameHands} hand${gameHands === 1 ? "" : "s"}</div>`;
+    }
     const thresholdMeta = (full.report && full.report.threshold_profile)
       || (full.stats_snapshot && full.stats_snapshot.threshold_profile)
       || {};
@@ -332,16 +361,12 @@
         ? `<span class="eval-profile-status ${s.profile_status}">${PROFILE_STATUS_LABEL[s.profile_status] || s.profile_status}</span>`
         : "";
       const isDisputed = disputedTags.has(s.tag);
-      const sectionSources = (s.evidence_sources || []).map((source) =>
-        `<span class="eval-evidence-chip">${escapeHTML((source.type || "unknown").replace(/_/g, " "))}</span>`
-      ).join("");
+      const sectionSources = evidenceSourceList(s.evidence_sources);
       const examples = (s.examples || []).map((example) => {
         const round = example.round_count;
         const plan = example.future_plan
           ? `<div><strong>Future plan:</strong> ${escapeHTML(example.future_plan)}</div>` : "";
-        const sources = (example.evidence_sources || []).map((source) =>
-          `<span class="eval-evidence-chip">${escapeHTML((source.type || "unknown").replace(/_/g, " "))}${source.pack_id ? ` · ${escapeHTML(source.pack_id)}` : ""}</span>`
-        ).join("");
+        const sources = evidenceSourceList(example.evidence_sources);
         return `<article class="eval-example">
           <div class="eval-example-head">
             <button class="eval-citation-chip" data-round="${round}">Hand #${round}</button>
@@ -352,7 +377,7 @@
           <div><strong>Better line:</strong> ${escapeHTML(example.better_line || "")}</div>
           <div><strong>Why:</strong> ${escapeHTML(example.why || "")}</div>
           ${plan}
-          ${sources ? `<div class="eval-evidence"><strong>Evidence:</strong> ${sources}</div>` : ""}
+          ${sources ? `<div class="eval-evidence"><strong>Based on:</strong> ${sources}</div>` : ""}
         </article>`;
       }).join("");
       html += `<div class="eval-section-card">
@@ -362,7 +387,7 @@
           ${profileBadge}
         </div>
         <p>${escapeHTML(s.narrative || "")}</p>
-        ${sectionSources ? `<div class="eval-evidence"><strong>Evidence:</strong> ${sectionSources}</div>` : ""}
+        ${sectionSources ? `<div class="eval-evidence"><strong>Based on:</strong> ${sectionSources}</div>` : ""}
         ${examples ? `<div class="eval-examples">${examples}</div>` : `<div class="eval-citations">${citations}</div>`}
         <div class="eval-section-foot">
           <button class="eval-dispute-btn${isDisputed ? " disputed" : ""}" data-tag="${s.tag}">
@@ -721,7 +746,7 @@
         buy_in: +$("cfg-buyin").value,
         ante: +ante.value,
         ante_type: anteType.value,
-        max_round: clamp(+$("cfg-rounds").value, 1, 500),
+        max_round: clamp(+$("cfg-rounds").value, 1, 100),
         randomize_styles: random.checked,
         hide_styles: $("cfg-hide").checked,
         styles,
