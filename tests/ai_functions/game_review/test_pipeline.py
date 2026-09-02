@@ -41,6 +41,8 @@ def _patch_session_local(db_session, monkeypatch):
     """
     TestSessionLocal = sessionmaker(bind=db_session.get_bind(), future=True, expire_on_commit=False)
     monkeypatch.setattr("ai_functions.game_review.pipeline.SessionLocal", TestSessionLocal)
+    # A developer's real local key must never make a unit test spend quota.
+    monkeypatch.delenv("POKERAI_API_KEY", raising=False)
 
 
 def _make_user(db, email="hero@test.local"):
@@ -171,11 +173,20 @@ def test_run_evaluation_completes_end_to_end(db_session, monkeypatch):
             "key": "cash_6max_100bb",
             "version": "2026-08-31.v6",
         },
+        "preflop_evidence": {
+            "configured": False,
+            "version": "6max",
+            "call_limit": 15,
+            "attempted": 0,
+            "resolved": 0,
+            "failures": [],
+        },
     }
     assert evaluation.stats_snapshot["game_level"]["hands_dealt"] == 2
     assert evaluation.stats_snapshot["sample_status"]["metrics"]
     assert evaluation.model_versions["stat_threshold_profile"] == "cash_6max_100bb"
     assert evaluation.model_versions["stat_threshold_version"] == "2026-08-31.v6"
+    assert evaluation.model_versions["preflop_strategy_api"] is None
     assert evaluation.folded_at is not None
 
     profile = db.get(PlayerProfile, (user.id, "cash_6max_100bb"))

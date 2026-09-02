@@ -14,6 +14,7 @@
     heuristic_inference: "AI strategy judgment",
     simulation_metadata: "Bot preset style",
     range_knowledge_base: "Preflop range chart",
+    preflop_strategy_api: "Preflop strategy API",
     solver_node: "Solver result",
   };
 
@@ -21,7 +22,12 @@
     const type = source.type || "unknown";
     const fallback = titleCase(type.replace(/_/g, " "));
     const label = EVIDENCE_TYPE_LABELS[type] || fallback;
-    const suffix = source.pack_id ? ` · ${source.pack_id}` : "";
+    const sourceId = source.pack_id || (
+      source.type === "preflop_strategy_api" && source.version
+        ? `${source.provider || "PokerAI"} ${source.version}`
+        : ""
+    );
+    const suffix = sourceId ? ` · ${sourceId}` : "";
     const detail = source.label || label;
     return `<span class="eval-evidence-chip" title="${escapeHTML(detail)}">` +
       `${escapeHTML(label + suffix)}</span>`;
@@ -338,6 +344,24 @@
       || {};
     if (thresholdMeta.key || thresholdMeta.version) {
       html += `<div class="eval-threshold-meta">Leak thresholds: ${thresholdMeta.key || "unknown"} · ${thresholdMeta.version || "unversioned"}</div>`;
+    }
+    const preflopMeta = (full.report && full.report.preflop_evidence) || {};
+    const preflopAttempted = Number(preflopMeta.attempted || 0);
+    const preflopResolved = Number(preflopMeta.resolved || 0);
+    if (preflopAttempted > 0) {
+      const apiSource = preflopResolved > 0
+        ? evidenceSourceList([{
+            type: "preflop_strategy_api",
+            provider: "PokerAI",
+            version: preflopMeta.version,
+            label: "PokerAI presolved preflop evidence used for selected decisions",
+          }])
+        : "PokerAI";
+      const fallbackCount = preflopAttempted - preflopResolved;
+      const fallbackText = fallbackCount > 0
+        ? ` · ${fallbackCount} fallback analysis` : "";
+      html += `<div class="eval-threshold-meta">Preflop evidence: ${apiSource} · ` +
+        `${preflopResolved}/${preflopAttempted} resolved${fallbackText}</div>`;
     }
     const sampleMetrics = (((full.stats_snapshot || {}).sample_status || {}).metrics || []);
     const insufficient = sampleMetrics.filter((metric) => metric.status === "insufficient_sample");

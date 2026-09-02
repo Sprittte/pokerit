@@ -1,4 +1,8 @@
-from ai_functions.decision_snapshot import build_decision_snapshots
+from ai_functions.decision_snapshot import (
+    build_decision_snapshots,
+    build_live_preflop_snapshot,
+)
+from ai_functions.preflop_ranges import build_preflop_request
 from poker_engine.db.models import (
     Action,
     BotStyle,
@@ -74,3 +78,53 @@ def test_snapshot_clips_future_action_and_labels_bot_style_as_metadata(db_sessio
         item for item in snapshot["evidence_sources"] if item["type"] == "simulation_metadata"
     )
     assert style_source["styles"] == ["tag"]
+
+
+def test_live_preflop_snapshot_links_matching_local_rfi_pack():
+    seats = [
+        {"uuid": f"p{i}", "name": f"P{i}", "stack": 10000, "state": "participating"}
+        for i in range(6)
+    ]
+    seats[5]["uuid"] = "hero"
+    round_state = {
+        "street": "preflop",
+        "round_count": 3,
+        "dealer_btn": 0,
+        "active_seats": [0, 1, 2, 3, 4, 5],
+        "next_player": 5,
+        "small_blind_amount": 50,
+        "big_blind_amount": 100,
+        "ante": 0,
+        "ante_type": "none",
+        "game_format": "cash",
+        "scenario": "cash_6max_100bb",
+        "seats": seats,
+        "hole_cards_by_uuid": {"hero": ["As", "Kh"]},
+        "pot": {"main": {"amount": 150}, "side": []},
+        "action_histories": {"preflop": [
+            {"uuid": "p3", "action": "FOLD", "amount": 0, "stack_after": 10000},
+            {"uuid": "p4", "action": "FOLD", "amount": 0, "stack_after": 10000},
+        ]},
+    }
+
+    snapshot = build_live_preflop_snapshot(round_state, "hero")
+
+    assert snapshot["known_facts"]["hero_position"] == "CO"
+    assert snapshot["derived_calculations"]["hero_stack_bb_at_decision"] == 100
+    source = next(
+        item for item in snapshot["evidence_sources"]
+        if item["type"] == "range_knowledge_base"
+    )
+    assert source["pack_id"] == "cash_6max_100bb_v1"
+    assert source["exact_frequencies_available"] is False
+
+    round_state["seats"][5]["stack"] = 9700
+    round_state["action_histories"]["preflop"].extend([
+        {"uuid": "hero", "action": "RAISE", "amount": 300, "stack_after": 9700},
+        {"uuid": "p0", "action": "RAISE", "amount": 900, "stack_after": 9100},
+    ])
+    later_snapshot = build_live_preflop_snapshot(round_state, "hero")
+
+    assert snapshot["decision_id"] == "3:preflop:2"
+    assert later_snapshot["decision_id"] == "3:preflop:4"
+    assert build_preflop_request(later_snapshot) is None

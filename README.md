@@ -20,6 +20,8 @@ map of the changes relative to upstream.
   big-blind ante, or a custom fixed-level game.
 - Practice against deterministic archetype bots or LLM-powered opponents.
 - Ask a concise, scenario-aware AI coach during play or from a saved hand.
+- Optionally ground 6-max 100BB cash preflop coaching in PokerAI's presolved
+  strategy API, with bundled RFI charts retained as the offline fallback.
 - Save every completed hand incrementally instead of waiting for a game to end.
 - Run a structured single-game review using future-clipped Decision Snapshots.
 - Track scope-isolated coaching profiles and rolling statistics over up to 500
@@ -71,6 +73,29 @@ user-supplied reads, and actual solver evidence.
 
 `AI GTO` is a configured simulation style; it is never presented as proof that
 a solver node was queried.
+
+#### Optional higher-fidelity preflop evidence
+
+For more precise **6-max 100BB cash** preflop frequencies and action lines beyond
+RFI, create a personal key at [PokerAI](https://pokerai.bet/console) and set
+`POKERAI_API_KEY` in `.env`. This integration is optional: when the key is
+missing, a request fails, or a spot is unsupported, Pokerit falls back to its
+bundled versioned RFI chart when one matches and otherwise uses clearly labelled
+AI strategy judgment.
+
+PokerAI preflop is a millisecond lookup over a fixed presolved pack, not a live
+preflop solve. Its frequencies do not adapt to the observed raise size. Pokerit
+therefore labels successful results as `Preflop strategy API`, records the
+provider/version/node assumptions, and does not present them as a live `Solver
+result`. The live coach queries only when the user asks during a current Hero
+preflop decision. A single-game review selects at most **15** additional
+preflop decisions for PokerAI lookup; other decisions continue to use local
+charts or AI judgment. Use this integration only inside Pokerit's simulated
+training and review workflows, never as assistance at a real-money table.
+
+The bundled charts remain available in all cases and are also linked into live
+coaching for matching RFI nodes. They do not contain exact mixed frequencies,
+and the derived cash 8-max and MTT 6-max packs retain their derivation warning.
 
 ### Single-game evaluation
 
@@ -134,6 +159,8 @@ silently reclassified as new 8-max data.
 - Docker Desktop
 - A Google OAuth web client
 - An OpenAI API key for the current default AI models
+- Optional: a personal PokerAI API key for higher-fidelity 6-max 100BB cash
+  preflop evidence
 
 ### 1. Configure the environment
 
@@ -148,6 +175,8 @@ GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 SESSION_SECRET=...
 OPENAI_API_KEY=...
+# Optional; obtain your own key from https://pokerai.bet/console
+POKERAI_API_KEY=...
 APP_BASE_URL=http://localhost:8000
 ```
 
@@ -229,6 +258,22 @@ These defaults currently live in the corresponding Python configuration
 modules; they are not selected by an environment variable. GPT-5 reasoning
 models are called without unsupported temperature parameters, and tool-bearing
 Chat Completions requests use `reasoning_effort="none"` for compatibility.
+
+### Optional PokerAI preflop reference
+
+`POKERAI_API_KEY` is a per-installation secret and is never stored in Git. Each
+local machine or deployed environment must configure its own key. Multiple
+machines using the same key share that provider account's quota. An optional
+`POKERAI_PREFLOP_VERSION` selects the fixed pack and defaults to `6max`.
+Changes to `.env` take effect when the app and worker containers next start;
+recreate those two services after adding or replacing a key in a running setup.
+
+The integration currently applies only to the first Hero preflop decision in a
+matching 6-max, no-ante cash hand near 100BB. Later Hero re-decisions are not
+rewritten into a different API node. Post-game evaluation makes at most 15
+calls per game and stores only the returned evidence for selected decisions in
+the evaluation snapshot. Never commit a real PokerAI key or distribute the
+provider's solution data.
 
 ### Account preferences
 
@@ -327,6 +372,9 @@ uv run pytest -q
   tournament lifecycle or an ICM engine.
 - The versioned range knowledge base currently covers RFI only. It fails closed
   outside matching format, table-size, stack, ante, position, and node data.
+- PokerAI's optional preflop endpoint currently covers fixed 6-max packs and is
+  sizing-insensitive; unsupported spots and provider failures fail closed to the
+  bundled RFI pack or AI strategy judgment.
 - Derived position mappings do not model card bunching.
 - LLM outputs remain probabilistic; deterministic stats, tags, citations,
   thresholds, and evidence labels are kept in code to limit that risk.

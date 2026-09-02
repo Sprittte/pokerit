@@ -17,7 +17,11 @@ import pytest
 from poker_engine.db.models import Action, Game, GamePlayer, Hand, HandPlayer, Street, User
 from shared_services.llm import StreamResult, TokenUsage
 
-from ai_functions.game_review.street_agent import parse_findings, run_street_agent
+from ai_functions.game_review.street_agent import (
+    _build_batch_message,
+    parse_findings,
+    run_street_agent,
+)
 
 
 def _make_user(db, email="hero@test.local"):
@@ -187,6 +191,42 @@ def test_run_street_agent_citation_matches_scripted_finding(db_session, monkeypa
     assert findings[0]["street"] == "preflop"
     assert findings[0]["tag"] == "missed_fold"
     assert findings[0]["decision_id"] == "7:preflop:0"
+
+
+def test_api_evidence_is_attached_only_to_its_exact_decision(db_session):
+    db = db_session
+    user = _make_user(db)
+    game, hero_gp, villain_gp = _make_game(db, user)
+    hand = _add_hand(db, game, hero_gp, villain_gp, round_count=12)
+    hand.actions[1].action = "raise"
+    hand.actions[1].amount = 900
+    db.add(Action(
+        hand_id=hand.id,
+        game_player_id=hero_gp.id,
+        street=Street.PREFLOP,
+        action="call",
+        amount=600,
+        seq=2,
+    ))
+    db.flush()
+    db.expire(hand, ["actions"])
+    api_source = {
+        "type": "preflop_strategy_api",
+        "provider": "PokerAI",
+        "version": "6max",
+        "decision_id": "12:preflop:0",
+    }
+
+    _, evidence_by_decision, _ = _build_batch_message(
+        "preflop",
+        [hand],
+        game,
+        hero_gp.id,
+        pokerai_evidence_by_decision={"12:preflop:0": api_source},
+    )
+
+    assert api_source in evidence_by_decision["12:preflop:0"]
+    assert api_source not in evidence_by_decision["12:preflop:2"]
 
 
 def _semantic_snapshot(category="one_pair", pair_context="third_pair"):

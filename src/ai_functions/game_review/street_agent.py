@@ -16,6 +16,7 @@ import re
 from poker_engine.db.models import Game, Hand
 from ai_functions.coach_engine.engine import build_scenario_context
 from ai_functions.decision_snapshot import build_decision_snapshots
+from ai_functions.preflop_ranges import apply_pokerai_evidence
 from shared_services.llm import chat_model_with_usage
 from shared_services.decision_facts import (
     hand_description_conflicts,
@@ -63,6 +64,9 @@ Rules you MUST follow:
   matching solver node was used.
 - Name the evidence category behind the conclusion. Exact solver frequencies
   or EV are forbidden unless a `solver_node` evidence source is present.
+  Frequencies supplied by `preflop_strategy_api` may be quoted only as a
+  presolved fixed-pack reference; never call that source a live solver result
+  or imply that its frequencies adapt to the observed raise size.
 - The snapshot's `known_facts.hero_hand`, canonical actions, and payment fields
   are authoritative. Never reinterpret `check` as call or the first postflop
   `bet` as a raise.
@@ -103,20 +107,23 @@ def _batches(items: list, size: int) -> list[list]:
 
 def _build_batch_message(
     street: str, batch: list[Hand], game: Game, hero_gp_id,
-) -> tuple[str, dict[int, list[dict]], dict[str, dict]]:
+    pokerai_evidence_by_decision: dict[str, dict] | None = None,
+) -> tuple[str, dict[str, list[dict]], dict[str, dict]]:
     snapshots = []
-    evidence_by_round: dict[int, list[dict]] = {}
     snapshots_by_id: dict[str, dict] = {}
     for hand in batch:
         hand_snapshots = build_decision_snapshots(game, hand, hero_gp_id, street)
+        for snapshot in hand_snapshots:
+            evidence = (pokerai_evidence_by_decision or {}).get(snapshot["decision_id"])
+            if evidence is not None:
+                apply_pokerai_evidence(snapshot, evidence)
         snapshots.extend(hand_snapshots)
         snapshots_by_id.update({snapshot["decision_id"]: snapshot for snapshot in hand_snapshots})
-        evidence_by_round[hand.round_count] = [
-            source
-            for snapshot in hand_snapshots
-            for source in snapshot.get("evidence_sources", [])
-        ]
-    return json.dumps(snapshots, ensure_ascii=False, indent=2), evidence_by_round, snapshots_by_id
+    evidence_by_decision = {
+        decision_id: snapshot.get("evidence_sources", [])
+        for decision_id, snapshot in snapshots_by_id.items()
+    }
+    return json.dumps(snapshots, ensure_ascii=False, indent=2), evidence_by_decision, snapshots_by_id
 
 
 def _strip_fences(text: str) -> str:
@@ -281,6 +288,7 @@ async def run_batch(
     game: Game,
     hero_gp_id,
     model: str = config.MODEL,
+    pokerai_evidence_by_decision: dict[str, dict] | None = None,
 ) -> list[dict]:
     """Run one street-review batch: one non-streaming LLM call, no tools.
 
@@ -294,8 +302,8 @@ async def run_batch(
     system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(street=street, tags=tags_str)
     if profile_key == "mtt_8max_15bb" and street == "preflop":
         system_prompt += "\n" + _PUSH_FOLD_FOCUS
-    user_content, evidence_by_round, snapshots_by_id = _build_batch_message(
-        street, batch, game, hero_gp_id,
+    user_content, evidence_by_decision, snapshots_by_id = _build_batch_message(
+        street, batch, game, hero_gp_id, pokerai_evidence_by_decision,
     )
     messages = [
         {"role": "system", "content": system_prompt},
@@ -320,8 +328,11 @@ async def run_batch(
     for finding in findings:
         # Evidence labels come from code-built snapshots, never model text.
         deduped = {}
-        for source in evidence_by_round.get(finding["round_count"], []):
-            deduped[(source.get("type"), source.get("pack_id"))] = source
+        for source in evidence_by_decision.get(finding["decision_id"], []):
+            deduped[(
+                source.get("type"), source.get("pack_id"),
+                source.get("version"), source.get("decision_id"),
+            )] = source
         finding["evidence_sources"] = list(deduped.values())
     return findings
 

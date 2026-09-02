@@ -27,6 +27,7 @@ def test_coach_prompts_are_shared_lean_and_mode_specific():
 
     assert "Default maximum: 100 words" in IN_GAME_COACH_PROMPT
     assert "Recorded hand, Exact math, Bot preset style" in IN_GAME_COACH_PROMPT
+    assert "Preflop\n  strategy API" in IN_GAME_COACH_PROMPT
     assert "AI strategy judgment, or Solver result" in IN_GAME_COACH_PROMPT
     assert "recorded state" not in IN_GAME_COACH_PROMPT
     assert "heuristic inference" not in IN_GAME_COACH_PROMPT
@@ -35,6 +36,23 @@ def test_coach_prompts_are_shared_lean_and_mode_specific():
     assert "Default maximum: 200 words" in GENERAL_COACH_PROMPT
     assert "80–150 words" in HAND_REVIEW_PROMPT
     assert MAX_REPLY_TOKENS == 2048
+
+
+def test_live_output_names_presolved_api_evidence_without_calling_it_solver():
+    result = _finalize_in_game_response(
+        "Action: fold\nWhy: the supplied presolved mix folds this hand.",
+        {"category": "preflop", "made_hand_label": "Preflop", "equity_calculation": None},
+        "English",
+        evidence_sources=[
+            {"type": "engine_state"},
+            {"type": "preflop_strategy_api"},
+        ],
+    )
+
+    assert result.endswith(
+        "Evidence: Recorded hand, Preflop strategy API, AI strategy judgment"
+    )
+    assert "Solver result" not in result
 
 
 def test_message_layers_keep_authoritative_context_before_user_history():

@@ -32,6 +32,8 @@ from ai_functions.coach_engine.engine import (
     chat,
     get_or_create_conversation,
 )
+from ai_functions.decision_snapshot import build_live_preflop_snapshot
+from ai_functions.preflop_ranges import apply_pokerai_evidence, query_preflop_strategy
 from poker_engine.db.models import Conversation, Game
 from poker_trainer.auth.deps import get_db, require_user
 from poker_engine.db.models import User
@@ -154,6 +156,7 @@ async def coach_chat(
     live_context: str | None = None
     scenario_context: str | None = None
     decision_facts: dict | None = None
+    evidence_sources: list[dict] | None = None
     if body.game_id is not None:
         session = manager.get(str(body.game_id))
         if session is not None:
@@ -173,6 +176,30 @@ async def coach_chat(
                     (round_state.get("hole_cards_by_uuid") or {}).get(session.hero_uuid),
                     round_state.get("community_card") or [],
                 )
+                preflop_snapshot = build_live_preflop_snapshot(
+                    round_state, session.hero_uuid,
+                ) if pending_ask is not None else None
+                if preflop_snapshot is not None:
+                    decision_id = preflop_snapshot["decision_id"]
+                    if decision_id not in session.preflop_strategy_cache:
+                        result = await query_preflop_strategy(preflop_snapshot)
+                        session.preflop_strategy_cache[decision_id] = result.evidence
+                    cached_evidence = session.preflop_strategy_cache[decision_id]
+                    if cached_evidence is not None:
+                        apply_pokerai_evidence(preflop_snapshot, cached_evidence)
+                    evidence_sources = preflop_snapshot.get("evidence_sources") or []
+                    strategy_sources = [
+                        source for source in evidence_sources
+                        if source.get("type") in {
+                            "preflop_strategy_api", "range_knowledge_base",
+                        }
+                    ]
+                    if strategy_sources:
+                        table_text += (
+                            "\n\nPreflop Strategy Evidence "
+                            "(code-resolved; use only within its stated assumptions):\n"
+                            + json.dumps(strategy_sources, ensure_ascii=False, indent=2)
+                        )
                 live_context = (
                     "Decision Snapshot (authoritative current hand; no future actions or run-out):\n"
                     "Use this hand for questions such as 'this hand', 'now', or 'what should I do'. "
@@ -205,6 +232,7 @@ async def coach_chat(
                 coach_scenario=coach_scenario,
                 scenario_context=scenario_context,
                 decision_facts=decision_facts,
+                evidence_sources=evidence_sources,
             )
             async for chunk in generator:
                 payload = json.dumps({"type": "chunk", "text": chunk})

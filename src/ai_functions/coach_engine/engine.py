@@ -89,10 +89,13 @@ in the user's language. Be direct, calm, and precise.
   to one short caveat rather than a long disclaimer.
 - When a recommendation materially depends on a source, finish with a compact
   `Evidence:` line using the same user-facing labels as the after-game coach:
-  Recorded hand, Exact math, Bot preset style, Preflop range chart, User-provided
-  read, AI strategy judgment, or Solver result. Never replace these with internal
-  provenance terms or a vague Solver/Heuristic badge. `AI GTO` is a configured bot
-  style, not evidence that a solver ran.
+  Recorded hand, Exact math, Bot preset style, Preflop range chart, Preflop
+  strategy API, User-provided read, AI strategy judgment, or Solver result.
+  Never replace these with internal provenance terms or a vague Solver/Heuristic
+  badge. `AI GTO` is a configured bot style, not evidence that a solver ran.
+- A `preflop_strategy_api` source is a presolved fixed-pack reference. You may
+  quote its supplied action frequencies, but must not call it a live solver result
+  or imply that its frequencies changed for the observed raise size.
 """
 
 HAND_REVIEW_TASK_PROMPT = """# Task: completed-hand review
@@ -200,6 +203,7 @@ def _finalize_in_game_response(
     hand_facts: dict | None,
     language: str,
     user_text: str = "",
+    evidence_sources: list[dict] | None = None,
 ) -> str:
     """Apply code-owned evidence and fail closed on unsupported live claims."""
     clean = _EVIDENCE_LINE_RE.sub("", text).strip()
@@ -248,8 +252,18 @@ def _finalize_in_game_response(
             f"Evidence: {evidence}"
         )
 
-    evidence = "Recorded hand, AI strategy judgment" if hand_facts else "AI strategy judgment"
-    return f"{clean}\n\nEvidence: {evidence}"
+    source_types = {
+        str(source.get("type") or "") for source in (evidence_sources or [])
+    }
+    labels: list[str] = []
+    if hand_facts or "engine_state" in source_types:
+        labels.append("Recorded hand")
+    if "preflop_strategy_api" in source_types:
+        labels.append("Preflop strategy API")
+    elif "range_knowledge_base" in source_types:
+        labels.append("Preflop range chart")
+    labels.append("AI strategy judgment")
+    return f"{clean}\n\nEvidence: {', '.join(labels)}"
 
 
 def build_scenario_context(source) -> str:
@@ -376,6 +390,7 @@ async def chat(
     coach_scenario: str = "hand_review",
     scenario_context: str | None = None,
     decision_facts: dict | None = None,
+    evidence_sources: list[dict] | None = None,
 ) -> AsyncIterator[str]:
     """Stream an assistant reply for `user_text` in the given conversation.
 
@@ -453,6 +468,7 @@ async def chat(
         if coach_scenario == "in_game":
             finalized = _finalize_in_game_response(
                 "".join(full_text), decision_facts, response_language, user_text,
+                evidence_sources,
             )
             full_text[:] = [finalized]
             yield finalized

@@ -8,6 +8,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Added an optional PokerAI presolved-preflop reference for 6-max 100BB cash,
+  linked into live coaching and capped at 15 selected post-game lookups per
+  evaluation, with explicit evidence provenance and bundled RFI fallback.
 - Added account-level `Realistic` and `Training` showdown visibility modes;
   training mode tables every bot that reaches showdown.
 - Added pre-runout live-card reveals after called all-ins close betting, plus

@@ -282,6 +282,9 @@ class GameSession:
         self.showdown_visibility = DEFAULT_SHOWDOWN_VISIBILITY
         self._early_showdown_revealed = False
         self._public_revealed_uuids: set[str] = set()
+        # One optional presolved lookup per Hero decision. Values include None
+        # so a failed/unsupported lookup is not retried by every follow-up chat.
+        self.preflop_strategy_cache: dict[str, dict | None] = {}
 
     # -- public config -------------------------------------------------------
 
