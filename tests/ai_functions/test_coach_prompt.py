@@ -7,6 +7,7 @@ from ai_functions.coach_engine.engine import (
     IN_GAME_COACH_PROMPT,
     MAX_REPLY_TOKENS,
     _build_messages,
+    _finalize_in_game_response,
     _resolve_response_language,
     build_scenario_context,
 )
@@ -25,6 +26,12 @@ def test_coach_prompts_are_shared_lean_and_mode_specific():
         assert "strictly through the binary lens" not in prompt
 
     assert "Default maximum: 100 words" in IN_GAME_COACH_PROMPT
+    assert "Recorded hand, Exact math, Bot preset style" in IN_GAME_COACH_PROMPT
+    assert "AI strategy judgment, or Solver result" in IN_GAME_COACH_PROMPT
+    assert "recorded state" not in IN_GAME_COACH_PROMPT
+    assert "heuristic inference" not in IN_GAME_COACH_PROMPT
+    assert "never say you can calculate" in IN_GAME_COACH_PROMPT
+    assert "explicit calculator result and its provenance" in IN_GAME_COACH_PROMPT
     assert "Default maximum: 200 words" in GENERAL_COACH_PROMPT
     assert "80–150 words" in HAND_REVIEW_PROMPT
     assert MAX_REPLY_TOKENS == 2048
@@ -124,3 +131,102 @@ def test_live_table_expresses_remaining_stacks_in_chips_and_bb():
     assert "Player to act now: yes" in table
     assert "To call: 100" in table
     assert "Legal actions: fold; call 100; raise to 200–2350" in table
+
+
+def test_live_table_includes_authoritative_hand_and_canonical_action_facts():
+    round_state = {
+        "dealer_btn": 0,
+        "active_seats": [0, 1],
+        "small_blind_amount": 50,
+        "big_blind_amount": 100,
+        "street": "river",
+        "seats": [
+            {"uuid": "hero", "name": "Hero", "stack": 8000, "state": "participating"},
+            {"uuid": "villain", "name": "Villain", "stack": 8000, "state": "participating"},
+        ],
+        "hole_cards_by_uuid": {"hero": ["9c", "6c"]},
+        "community_card": ["9h", "Th", "7c", "Qc", "Ac"],
+        "pot": {"main": {"amount": 2150}, "side": []},
+        "action_histories": {
+            "turn": [
+                {"uuid": "hero", "action": "CALL", "amount": 0},
+                {"uuid": "villain", "action": "RAISE", "amount": 1000},
+                {"uuid": "hero", "action": "CALL", "amount": 1000},
+            ],
+        },
+    }
+
+    table = format_table(round_state, "hero")
+
+    assert "Made hand: Flush, Ace high (category: flush)" in table
+    assert "No numeric equity has been calculated" in table
+    assert "Player (BTN) checks" in table
+    assert "Villain (BB) bets 1000" in table
+    assert "Player (BTN) calls 1000" in table
+
+
+def test_in_game_output_gate_rejects_unproven_equity_interval():
+    facts = {
+        "category": "one_pair", "made_hand_label": "Pair of Nines",
+        "equity_calculation": None,
+    }
+
+    result = _finalize_in_game_response(
+        "Action: call\nWhy: equity 大约 24%–27%\nEvidence: Exact math",
+        facts,
+        "Chinese",
+    )
+
+    assert "已拦截" in result
+    assert "24%" not in result
+    assert result.endswith("Evidence: Recorded hand")
+
+
+def test_in_game_output_gate_uses_equity_question_when_answer_omits_the_word():
+    facts = {
+        "category": "one_pair", "made_hand_label": "Pair of Nines",
+        "equity_calculation": None,
+    }
+
+    result = _finalize_in_game_response(
+        "Action: call\nWhy: 大约 24%–27%。",
+        facts,
+        "Chinese",
+        "请直接算 equity 区间",
+    )
+
+    assert "已拦截" in result
+    assert "24%" not in result
+
+
+def test_in_game_output_gate_rejects_next_message_work_promises():
+    facts = {
+        "category": "one_pair", "made_hand_label": "Pair of Nines",
+        "equity_calculation": None,
+    }
+
+    result = _finalize_in_game_response(
+        "Action: call\nPlan: 如果你想，我下一条可以把 outs 分组。",
+        facts,
+        "Chinese",
+    )
+
+    assert "已拦截" in result
+    assert "下一条可以" not in result
+
+
+def test_in_game_output_gate_rejects_pair_downgrade_after_flush_arrives():
+    facts = {
+        "category": "flush", "made_hand_label": "Flush, Ace high",
+        "equity_calculation": None,
+    }
+
+    result = _finalize_in_game_response(
+        "Action: check\nWhy: 你只有一对9，不能价值下注。",
+        facts,
+        "Chinese",
+    )
+
+    assert "已拦截" in result
+    assert "Flush, Ace high" in result
+    assert result.endswith("Evidence: Recorded hand")

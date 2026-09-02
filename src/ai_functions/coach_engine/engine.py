@@ -22,6 +22,7 @@ from collections.abc import AsyncIterator
 from sqlalchemy.orm import Session
 
 from poker_engine.db.models import Conversation, Message
+from shared_services.decision_facts import hand_description_conflicts
 from shared_services.llm import TokenUsage, stream_chat_with_usage
 
 MAX_CONTEXT_TOKENS = 10_000
@@ -32,6 +33,17 @@ TEMPERATURE = 1
 
 _HAN_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 _LATIN_RE = re.compile(r"[A-Za-z]")
+_EVIDENCE_LINE_RE = re.compile(r"(?im)^\s*Evidence:\s*.*(?:\r?\n|$)")
+_EQUITY_NUMBER_RE = re.compile(
+    r"(?is)(?:equity|win\s*rate|胜率|权益|赢率).{0,80}\d+(?:\.\d+)?\s*%"
+    r"|\d+(?:\.\d+)?\s*%.{0,80}(?:equity|win\s*rate|胜率|权益|赢率)"
+)
+_EQUITY_TOPIC_RE = re.compile(r"(?is)(?:equity|win\s*rate|胜率|权益|赢率)")
+_PERCENT_RE = re.compile(r"\d+(?:\.\d+)?\s*%")
+_DEFERRED_WORK_RE = re.compile(
+    r"(?is)(?:下一(?:条|轮|次回复)|下条|next\s+(?:message|reply|turn)).{0,80}"
+    r"(?:可以|会|帮|算|分析|分组|can|will|calculate|analy[sz]e|group)"
+)
 
 CORE_COACH_PROMPT = """# Role and objective
 You are an expert No-Limit Hold'em coach for cash games and tournaments. Improve
@@ -40,8 +52,13 @@ in the user's language. Be direct, calm, and precise.
 
 # Evidence discipline
 - Treat supplied scenario, hand, and table data as authoritative.
+- Treat supplied deterministic hand facts and canonical actions as code-owned.
+  Never downgrade or reinterpret them from the raw cards or engine action names.
 - Distinguish known facts from inference. Never invent solver outputs, exact range
   frequencies, opponent tendencies, population reads, payout pressure, or ICM.
+- Never give numeric equity, equity intervals, or clean-out counts unless the
+  context includes an explicit calculator result and its provenance. Structural
+  cards remaining by rank or suit are not clean outs and are not equity.
 - Judge a decision only from information available when it was made. Ignore the
   eventual result except when the user explicitly asks about outcome variance.
 - If missing information could change the answer, state one brief assumption and
@@ -71,10 +88,11 @@ in the user's language. Be direct, calm, and precise.
 - Use concrete sizes in chips and big blinds when the data permits. Keep uncertainty
   to one short caveat rather than a long disclaimer.
 - When a recommendation materially depends on a source, finish with a compact
-  `Evidence:` line naming one or more of: recorded state, deterministic math,
-  configured bot style, versioned range pack, user-supplied read, heuristic
-  inference, or solver node. Never collapse these into a vague Solver/Heuristic
-  badge. `AI GTO` is a configured bot style, not evidence that a solver ran.
+  `Evidence:` line using the same user-facing labels as the after-game coach:
+  Recorded hand, Exact math, Bot preset style, Preflop range chart, User-provided
+  read, AI strategy judgment, or Solver result. Never replace these with internal
+  provenance terms or a vague Solver/Heuristic badge. `AI GTO` is a configured bot
+  style, not evidence that a solver ran.
 """
 
 HAND_REVIEW_TASK_PROMPT = """# Task: completed-hand review
@@ -102,6 +120,10 @@ Output only the useful fields:
 - `Action:` the recommended action and size.
 - `Why:` the one or two decisive reasons.
 - `Plan:` one short future-street contingency, only when it is strategically useful.
+
+`Plan:` is a contingency inside this hand, not an offer to do more work later.
+Answer the current request now; never say you can calculate, group, or analyze it
+in the next message, and never ask whether the user wants that promised follow-up.
 
 Default maximum: 100 words. Do not recap the hand and do not add a general lesson.
 """
@@ -167,6 +189,67 @@ def _language_instruction(language: str) -> str:
         "Response language for this turn: English. Reply in English even if prior "
         "assistant replies used another language."
     )
+
+
+def _in_game_fact_conflict(text: str, hand_facts: dict | None) -> bool:
+    return hand_description_conflicts(text, hand_facts)
+
+
+def _finalize_in_game_response(
+    text: str,
+    hand_facts: dict | None,
+    language: str,
+    user_text: str = "",
+) -> str:
+    """Apply code-owned evidence and fail closed on unsupported live claims."""
+    clean = _EVIDENCE_LINE_RE.sub("", text).strip()
+    conflict = _in_game_fact_conflict(clean, hand_facts)
+    unsupported_equity = bool(
+        (
+            _EQUITY_NUMBER_RE.search(clean)
+            or (_EQUITY_TOPIC_RE.search(user_text) and _PERCENT_RE.search(clean))
+        )
+        and not (hand_facts or {}).get("equity_calculation")
+    )
+    deferred_work = bool(_DEFERRED_WORK_RE.search(clean))
+    if conflict or unsupported_equity or deferred_work:
+        label = (hand_facts or {}).get("made_hand_label") or "unknown"
+        if language == "Chinese":
+            reason = (
+                f"模型描述与确定性牌力冲突；你的已知成牌是 {label}。"
+                if conflict else
+                (
+                    f"当前快照没有带计算来源的 equity 结果；模型给出的具体区间未被采用。"
+                    f"你的确定性成牌是 {label}。"
+                    if unsupported_equity else
+                    "答复试图把当前工作推迟到下一条消息，因此没有把这个承诺展示为有效计划。"
+                )
+            )
+            evidence = "Recorded hand" if hand_facts else "AI strategy judgment"
+            return (
+                "Action: **已拦截这条建议，请重试当前问题。**\n\n"
+                f"Why: {reason}\n\n"
+                f"Evidence: {evidence}"
+            )
+        reason = (
+            f"The model description conflicts with the deterministic hand: {label}."
+            if conflict else
+            (
+                f"No calculator provenance was supplied for numeric equity. The stated range was discarded. "
+                f"The deterministic made hand is {label}."
+                if unsupported_equity else
+                "The reply deferred the current work to a later message, so that promise was not accepted as a valid plan."
+            )
+        )
+        evidence = "Recorded hand" if hand_facts else "AI strategy judgment"
+        return (
+            "Action: **This recommendation was blocked; retry the current question.**\n\n"
+            f"Why: {reason}\n\n"
+            f"Evidence: {evidence}"
+        )
+
+    evidence = "Recorded hand, AI strategy judgment" if hand_facts else "AI strategy judgment"
+    return f"{clean}\n\nEvidence: {evidence}"
 
 
 def build_scenario_context(source) -> str:
@@ -292,6 +375,7 @@ async def chat(
     conv_pair: int = SHORT_TERM_PAIRS,
     coach_scenario: str = "hand_review",
     scenario_context: str | None = None,
+    decision_facts: dict | None = None,
 ) -> AsyncIterator[str]:
     """Stream an assistant reply for `user_text` in the given conversation.
 
@@ -313,10 +397,10 @@ async def chat(
         system_prompt = GENERAL_COACH_PROMPT
 
     language_context = None
+    response_language = "English"
     if coach_scenario == "in_game":
-        language_context = _language_instruction(
-            _resolve_response_language(user_text, history)
-        )
+        response_language = _resolve_response_language(user_text, history)
+        language_context = _language_instruction(response_language)
 
     msgs = _build_messages(
         history,
@@ -363,7 +447,15 @@ async def chat(
                 usage = chunk
             else:
                 full_text.append(chunk)
-                yield chunk
+                if coach_scenario != "in_game":
+                    yield chunk
+
+        if coach_scenario == "in_game":
+            finalized = _finalize_in_game_response(
+                "".join(full_text), decision_facts, response_language, user_text,
+            )
+            full_text[:] = [finalized]
+            yield finalized
 
         # After streaming finishes, persist assistant message + update counters.
         assistant_seq = _next_seq(db, conversation_id)

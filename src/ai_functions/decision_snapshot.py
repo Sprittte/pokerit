@@ -11,8 +11,9 @@ from typing import Any
 
 from ai_functions.preflop_ranges import get_range_pack, normalize_starting_hand
 from poker_engine.db.models import Game, Hand
+from shared_services.decision_facts import build_hand_facts
 
-SCHEMA_VERSION = "decision_snapshot.v1"
+SCHEMA_VERSION = "decision_snapshot.v2"
 
 
 def _style_value(player) -> str | None:
@@ -56,8 +57,10 @@ def build_decision_snapshots(game: Game, hand: Hand, hero_gp_id, street: str) ->
             action_history.append({
                 "actor": "Hero" if item.get("is_hero") else item.get("name"),
                 "position": item.get("position"),
-                "action": item.get("action"),
-                "amount": item.get("amount"),
+                "action": item.get("canonical_action") or item.get("action"),
+                "raw_action": item.get("raw_action") or item.get("action"),
+                "amount_paid": item.get("amount_paid"),
+                "amount_to": item.get("amount_to"),
                 "bot_style": _style_value(actor) if actor and actor.is_bot else None,
             })
 
@@ -84,8 +87,11 @@ def build_decision_snapshots(game: Game, hand: Hand, hero_gp_id, street: str) ->
         # does. This intentionally fixes late-position RFI evidence, which the
         # old "any prior action" check accidentally limited to UTG.
         entered_before = any(
-            a.get("action") == "raise"
-            or (a.get("action") == "call" and (a.get("amount") or 0) > 0)
+            (a.get("canonical_action") or a.get("action")) == "raise"
+            or (
+                (a.get("canonical_action") or a.get("action")) == "call"
+                and (a.get("amount_paid") or 0) > 0
+            )
             for a in prior
         )
         if street == "preflop" and not entered_before and hero_hand:
@@ -114,13 +120,18 @@ def build_decision_snapshots(game: Game, hand: Hand, hero_gp_id, street: str) ->
                 "hero_position": hero.get("position"),
                 "hero_cards": hero.get("hole_cards"),
                 "board_visible": street_data.get("board") or [],
+                "hero_hand": build_hand_facts(
+                    hero.get("hole_cards"), street_data.get("board") or [],
+                ),
                 "pot_before_action": action.get("pot_before"),
                 "hero_stack_before": action.get("stack_before"),
                 "hero_street_bet_before": action.get("street_bet"),
                 "action_history_before": action_history,
                 "hero_action": {
-                    "action": action.get("action"),
-                    "amount": action.get("amount"),
+                    "action": action.get("canonical_action") or action.get("action"),
+                    "raw_action": action.get("raw_action") or action.get("action"),
+                    "amount_paid": action.get("amount_paid"),
+                    "amount_to": action.get("amount_to"),
                     "all_in": action.get("is_allin", False),
                 },
             },

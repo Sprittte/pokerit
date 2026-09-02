@@ -60,10 +60,13 @@ def test_snapshot_clips_future_action_and_labels_bot_style_as_metadata(db_sessio
 
     snapshot = build_decision_snapshots(game, hand, hero.id, "preflop")[0]
 
+    assert snapshot["schema_version"] == "decision_snapshot.v2"
     assert snapshot["known_facts"]["action_history_before"] == []
     assert snapshot["known_facts"]["hero_action"] == {
-        "action": "raise", "amount": 200, "all_in": False,
+        "action": "raise", "raw_action": "raise",
+        "amount_paid": 200, "amount_to": 200, "all_in": False,
     }
+    assert snapshot["known_facts"]["hero_hand"]["category"] == "preflop"
     source_types = {item["type"] for item in snapshot["evidence_sources"]}
     assert "simulation_metadata" in source_types
     assert "range_knowledge_base" in source_types

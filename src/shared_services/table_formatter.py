@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from shared_services.decision_facts import (
+    build_hand_facts,
+    format_hand_facts,
+    normalize_action_rows,
+)
 from shared_services.hand_formatter import pos_label
 
 
@@ -22,17 +27,22 @@ def _action_line(
     if not is_hero and seat_styles.get(uuid_):
         who += f" [simulation style: {seat_styles[uuid_]}]"
 
-    action = entry.get("action", "").lower()
+    action = entry.get("canonical_action") or entry.get("action", "").lower()
     amt = entry.get("amount") or 0
     stack_after = entry.get("stack_after")
     allin = f" (ALL IN)" if stack_after == 0 else ""
 
     if action == "fold":
         return f"{who} folds"
+    if action == "bet":
+        return f"{who} bets {entry.get('amount_paid', amt)}{allin}"
     if action == "raise":
-        return f"{who} raises to {amt}{allin}"
+        return f"{who} raises to {entry.get('amount_to', amt)}{allin}"
     if action == "call":
-        return f"{who} calls {amt}{allin}" if amt > 0 else f"{who} checks"
+        paid = entry.get("amount_paid", amt)
+        return f"{who} calls {paid}{allin}" if paid > 0 else f"{who} checks"
+    if action == "check":
+        return f"{who} checks"
     if action == "smallblind":
         return f"{who} posts small blind {amt}"
     if action == "bigblind":
@@ -163,6 +173,8 @@ def format_table(
     # Community cards
     if community:
         lines.append(f"Board: {_cards(community)}")
+        if hero_cards:
+            lines.extend(format_hand_facts(build_hand_facts(hero_cards, community)))
 
     next_player = round_state.get("next_player")
     actor_uuid = None
@@ -187,6 +199,14 @@ def format_table(
         actions = action_histories.get(st, [])
         if not actions:
             continue
+        commitments: dict[str, int] = {}
+        if st == "preflop":
+            for uuid_, position in seat_positions.items():
+                if position == "SB":
+                    commitments[uuid_] = sb_amount
+                elif position == "BB":
+                    commitments[uuid_] = bb_amount
+        actions = normalize_action_rows(actions, st, commitments)
         lines.append(f"{street_labels[st]}:")
         for a in actions:
             lines.append(_action_line(a, seat_names, seat_positions, seat_styles, hero_uuid))

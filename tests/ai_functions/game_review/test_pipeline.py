@@ -313,7 +313,9 @@ def test_second_evaluation_reports_returning_leak_and_profile_confirms(db_sessio
     async def _fake_street_reports_missed_fold(**kwargs):
         findings = [{
             "tag": "missed_fold", "round_count": 0,
-            "hero_action": "called", "issue": "range is too weak",
+            "decision_id": "0:preflop:0", "hero_hand_category": "preflop",
+            "hero_action_code": "raise", "facing_action_code": "none",
+            "hero_action": "raised to 300", "issue": "range is too weak",
             "better_line": "fold", "why": "folding avoids a dominated continue",
             "confidence": "high",
         }]

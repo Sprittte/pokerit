@@ -21,6 +21,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and limp-reraise statistics.
 - Added deterministic RFI findings for unsupported first-in limps, including
   exact range-pack actions and auditable hand-level preflop evidence.
+- Added shared deterministic coaching facts for made hands, best-five cards,
+  pair context, structural draws, and canonical check/bet/call/raise semantics.
 - Added regression coverage for early game termination, game-length limits,
   table action serialization, preflop classification, coach context/language,
   VPIP sampling, evidence wording, and evaluation synthesis.
@@ -53,6 +55,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Expanded live coach context with an authoritative decision snapshot containing
   hand number, street, current actor, hero-to-act state, call amount, and legal
   fold/call/raise bounds.
+- Changed live coaching and street review to reject hand/action contradictions,
+  unsupported numeric equity, and next-message work promises before they are
+  displayed or folded into a coaching profile.
 - Replaced internal evidence identifiers with direct UI labels such as
   `Recorded hand`, `Exact math`, `Recorded stats`, `AI strategy judgment`, and
   `Bot preset style`, displayed under `Based on` with explanatory tooltips.
@@ -70,6 +75,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   listing them explicitly as `MUCKED`, without exposing their cards.
 - Fixed RFI range-pack matching after players fold before the hero, so supported
   late-position first-in decisions are no longer incorrectly limited to UTG.
+- Fixed flush/high-card labels that could use input card order instead of the
+  actual highest rank, and separated amount paid from raise-to amounts in coach
+  and review contexts.
 - Fixed preflop coaching narratives so SB completes and over-limps cannot be
   presented as open-limp leaks, and limp-reraises cannot inflate standard
   3-bet opportunities.

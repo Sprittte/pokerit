@@ -20,7 +20,7 @@ def detect_rfi_limp_findings(game, hands: list, hero_gp_id) -> list[dict]:
             action = facts.get("hero_action") or {}
             if facts.get("hero_position") == "SB" \
                     or action.get("action") != "call" \
-                    or int(action.get("amount") or 0) <= 0:
+                    or int(action.get("amount_paid") or 0) <= 0:
                 continue
 
             range_source = next(
@@ -59,7 +59,7 @@ def detect_rfi_limp_findings(game, hands: list, hero_gp_id) -> list[dict]:
                 "hand_id": str(hand.id),
                 "round_count": hand.round_count,
                 "street": "preflop",
-                "hero_action": f"open-limped {int(action.get('amount') or 0)}",
+                "hero_action": f"open-limped {int(action.get('amount_paid') or 0)}",
                 "issue": issue,
                 "better_line": better_line,
                 "why": (

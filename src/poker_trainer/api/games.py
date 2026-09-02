@@ -28,6 +28,7 @@ from poker_trainer.preferences import (
     showdown_visibility_from_preferences,
     validate_quick_sizes,
 )
+from shared_services.decision_facts import normalize_action_rows
 
 router = APIRouter(prefix="/api", tags=["games"])
 
@@ -509,6 +510,8 @@ def _build_hand_detail(game: Game, hand: Hand, hero_gp_id) -> dict:
                 ),
                 "pot_after": pot_carried + chips_added_this_street,
             })
+
+        action_rows = normalize_action_rows(action_rows, st)
 
         # Player stacks at the START of this street.
         # Include players who were still active entering this street.

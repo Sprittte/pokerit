@@ -166,7 +166,9 @@ def test_run_street_agent_citation_matches_scripted_finding(db_session, monkeypa
     async def _fake_chat_model_with_usage(**kwargs):
         finding = {
             "tag": "missed_fold", "round_count": 7,
-            "hero_action": "called", "issue": "range is too weak",
+            "decision_id": "7:preflop:0", "hero_hand_category": "preflop",
+            "hero_action_code": "raise", "facing_action_code": "none",
+            "hero_action": "raised to 300", "issue": "range is too weak",
             "better_line": "fold", "why": "calling realizes equity poorly",
             "confidence": "high",
         }
@@ -184,3 +186,101 @@ def test_run_street_agent_citation_matches_scripted_finding(db_session, monkeypa
     assert findings[0]["round_count"] == 7
     assert findings[0]["street"] == "preflop"
     assert findings[0]["tag"] == "missed_fold"
+    assert findings[0]["decision_id"] == "7:preflop:0"
+
+
+def _semantic_snapshot(category="one_pair", pair_context="third_pair"):
+    return {
+        "decision_id": "9:turn:2",
+        "round_count": 9,
+        "street": "turn",
+        "known_facts": {
+            "hero_hand": {
+                "category": category,
+                "pair_context": pair_context,
+                "equity_calculation": None,
+            },
+            "action_history_before": [{"action": "bet"}],
+            "hero_action": {"action": "call"},
+        },
+    }
+
+
+def _semantic_finding(tag="slowplay_risk", category="one_pair"):
+    return {
+        "tag": tag,
+        "round_count": 9,
+        "decision_id": "9:turn:2",
+        "hero_hand_category": category,
+        "hero_action_code": "call",
+        "facing_action_code": "bet",
+        "hero_action": "called 1000",
+        "issue": "hero was too passive",
+        "better_line": "raise",
+        "why": "extract value",
+    }
+
+
+def test_semantic_validator_drops_slowplay_tag_for_third_pair():
+    hand = Hand(round_count=9)
+    hand.id = "hand-uuid-9"
+    snapshot = _semantic_snapshot()
+
+    findings = parse_findings(
+        json.dumps([_semantic_finding()]),
+        [hand],
+        "turn",
+        snapshots_by_id={snapshot["decision_id"]: snapshot},
+    )
+
+    assert findings == []
+
+
+def test_semantic_validator_drops_hand_or_action_echo_mismatch():
+    hand = Hand(round_count=9)
+    hand.id = "hand-uuid-9"
+    snapshot = _semantic_snapshot(category="flush", pair_context=None)
+    finding = _semantic_finding(tag="missed_fold", category="one_pair")
+
+    findings = parse_findings(
+        json.dumps([finding]),
+        [hand],
+        "turn",
+        snapshots_by_id={snapshot["decision_id"]: snapshot},
+    )
+
+    assert findings == []
+
+
+def test_semantic_validator_drops_numeric_equity_without_provenance():
+    hand = Hand(round_count=9)
+    hand.id = "hand-uuid-9"
+    snapshot = _semantic_snapshot(category="flush", pair_context=None)
+    finding = _semantic_finding(tag="missed_fold", category="flush")
+    finding["why"] = "equity is only 24%"
+
+    findings = parse_findings(
+        json.dumps([finding]),
+        [hand],
+        "turn",
+        snapshots_by_id={snapshot["decision_id"]: snapshot},
+    )
+
+    assert findings == []
+
+
+def test_semantic_validator_drops_explanation_that_downgrades_a_flush_to_pair():
+    hand = Hand(round_count=9)
+    hand.id = "hand-uuid-9"
+    snapshot = _semantic_snapshot(category="flush", pair_context=None)
+    finding = _semantic_finding(tag="missed_fold", category="flush")
+    finding["issue"] = "Hero only has one pair and cannot continue"
+
+    findings = parse_findings(
+        json.dumps([finding]),
+        [hand],
+        "turn",
+        snapshots_by_id={snapshot["decision_id"]: snapshot},
+    )
+
+    assert findings == []

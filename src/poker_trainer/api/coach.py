@@ -37,6 +37,7 @@ from poker_trainer.auth.deps import get_db, require_user
 from poker_engine.db.models import User
 from poker_trainer.game.manager import manager
 from shared_services.table_formatter import format_table
+from shared_services.decision_facts import build_hand_facts
 
 router = APIRouter(prefix="/api/coach", tags=["coach"])
 
@@ -152,6 +153,7 @@ async def coach_chat(
 
     live_context: str | None = None
     scenario_context: str | None = None
+    decision_facts: dict | None = None
     if body.game_id is not None:
         session = manager.get(str(body.game_id))
         if session is not None:
@@ -166,6 +168,10 @@ async def coach_chat(
                     round_state,
                     session.hero_uuid,
                     valid_actions=valid_actions,
+                )
+                decision_facts = build_hand_facts(
+                    (round_state.get("hole_cards_by_uuid") or {}).get(session.hero_uuid),
+                    round_state.get("community_card") or [],
                 )
                 live_context = (
                     "Decision Snapshot (authoritative current hand; no future actions or run-out):\n"
@@ -198,6 +204,7 @@ async def coach_chat(
                 conv_pair=3,
                 coach_scenario=coach_scenario,
                 scenario_context=scenario_context,
+                decision_facts=decision_facts,
             )
             async for chunk in generator:
                 payload = json.dumps({"type": "chunk", "text": chunk})
