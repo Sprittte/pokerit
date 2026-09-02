@@ -54,6 +54,38 @@ uv run --extra dev pytest -q
 uv run --extra dev pytest -q <test paths or -k expression>
 ```
 
+## Default implementation and Git workflow
+
+- An authorized request to implement, fix, change, create, or update something
+  automatically includes the normal completion workflow. The user does not need
+  to separately ask for task-diff inspection, relevant testing, handling of
+  task-caused test failures, or a final change summary.
+- After implementation, automatically inspect the task-scoped diff and, when
+  code or behavior changed, run the safest relevant targeted tests allowed by
+  the live-application, database-isolation, and privacy rules below.
+- If a relevant check fails, do not commit or describe the task as complete.
+  Determine whether the task caused the failure; fix task-caused failures within
+  the already authorized scope, and report unrelated failures without modifying
+  unrelated code. If a check cannot be run safely or meaningfully, report it as
+  not run with the reason instead of silently skipping it.
+- Do not automatically commit after implementation. Leave the verified changes
+  in the working tree so the user can inspect or play-test them first.
+- A standalone user instruction to `commit` authorizes a fresh status/diff
+  review, staging only the completed task-scoped changes, and creating one or
+  more logically atomic local commits as needed. It does not authorize a push.
+  When scope is clear, split independent task-scoped changes automatically and
+  report the grouping; ask only when the intended ownership or boundary cannot
+  be determined safely.
+- A standalone instruction to `push` authorizes pushing existing local commits
+  on the current branch. It does not authorize committing working-tree changes.
+  `commit and push` authorizes both operations in that order.
+- `prepare a PR` authorizes aggregate analysis and draft PR text only. `create`
+  or `open a PR` authorizes pushing the current branch's existing commits when
+  needed and creating the PR, but does not authorize committing unrelated or
+  uncommitted working-tree changes.
+- The user should only need to state the desired product change and later the
+  desired Git action; do not require them to restate this SOP in each prompt.
+
 ## Product contracts
 
 - Keep these coaching surfaces distinct:
@@ -122,6 +154,26 @@ uv run --extra dev pytest -q <test paths or -k expression>
 
 - Report the exact checks run and distinguish passed, failed, skipped, and not
   run. Do not call an untested change verified.
+- After each authorized implementation task, inspect the task-scoped Git diff
+  and include a concise working change summary in the final response: behavior
+  changed, checks run, known risks or limitations, and a suggested commit title.
+  This is a working summary, not a `CHANGELOG.md` entry.
+- Treat the repository state, diff, commit history, and test results as the
+  sources of truth for change summaries. Conversation context may help explain
+  intent but must not replace inspecting the final code.
+- Keep commits logically atomic. When a requested commit contains multiple clear
+  task-scoped groups, split them into focused commits and report the grouping;
+  do not silently combine them into one broad commit.
+- Before a requested commit, push, or pull request, perform a fresh aggregate
+  analysis rather than reusing earlier summaries. For a commit, inspect the
+  staged changes and disclose relevant unstaged or untracked files. For a pull
+  request, inspect the complete branch diff against the intended base branch,
+  the branch commits, and any remaining uncommitted changes.
+- For pull-request preparation, produce a concise title and description covering
+  the motivation, actual behavior changes, test evidence, risks, and follow-up
+  work. Propose release changelog text only for user-visible behavior, setup,
+  compatibility, or release changes; omit internal refactors, test-only changes,
+  and mechanical cleanup.
 - Use `README.md` for the current architecture, setup, and operational overview;
   use code and tests for executable behavior. Treat `docs/UPSTREAM_CHANGES.md` as
   a reviewer snapshot and cross-check it against current code and Git history.
