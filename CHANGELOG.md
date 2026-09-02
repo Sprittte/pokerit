@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-03
+
 ### Added
 
 - Added an optional PokerAI presolved-preflop reference for 6-max 100BB cash,
@@ -240,5 +242,6 @@ never have been visible. A downgrade cannot reconstruct those cards.
   the proposed commit.
 - Confirm the tag, attribution, and upstream PR scope.
 
-[Unreleased]: https://github.com/Sprittte/pokerit/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Sprittte/pokerit/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Sprittte/pokerit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Sprittte/pokerit/releases/tag/v0.2.0

@@ -1,6 +1,6 @@
 # Poker Trainer
 
-Current release: **v0.2.0** — 2026-07-29
+Current release: **v0.3.0** — 2026-09-03
 
 A local-first No-Limit Hold'em training application built with
 [PokerKit](https://github.com/uoftcprg/pokerkit), FastAPI, PostgreSQL, and LLM-
