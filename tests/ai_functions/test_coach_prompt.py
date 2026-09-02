@@ -8,9 +8,11 @@ from ai_functions.coach_engine.engine import (
     MAX_REPLY_TOKENS,
     _build_messages,
     _finalize_in_game_response,
+    _requested_earlier_board_streets,
     _resolve_response_language,
     build_scenario_context,
 )
+from ai_functions.tools.loop import ToolCallRecord
 from shared_services.table_formatter import format_table
 
 
@@ -33,6 +35,8 @@ def test_coach_prompts_are_shared_lean_and_mode_specific():
     assert "heuristic inference" not in IN_GAME_COACH_PROMPT
     assert "never say you can calculate" in IN_GAME_COACH_PROMPT
     assert "explicit calculator result and its provenance" in IN_GAME_COACH_PROMPT
+    assert "call the range-equity tool" in IN_GAME_COACH_PROMPT
+    assert "never derive" in IN_GAME_COACH_PROMPT
     assert "Default maximum: 200 words" in GENERAL_COACH_PROMPT
     assert "80–150 words" in HAND_REVIEW_PROMPT
     assert MAX_REPLY_TOKENS == 2048
@@ -92,6 +96,13 @@ def test_ambiguous_language_uses_last_clear_user_message_not_assistant():
     ]
 
     assert _resolve_response_language("...?", history) == "English"
+
+
+def test_earlier_board_selection_requires_an_explicit_user_request():
+    assert _requested_earlier_board_streets("先不看第五张牌，算 equity") == {"turn"}
+    assert _requested_earlier_board_streets("What was my turn equity before river?") == {"turn"}
+    assert _requested_earlier_board_streets("回到翻牌，算当时 equity") == {"flop"}
+    assert _requested_earlier_board_streets("现在 equity 是多少？") == set()
 
 
 def test_scenario_context_distinguishes_starting_from_current_stack():
@@ -248,3 +259,113 @@ def test_in_game_output_gate_rejects_pair_downgrade_after_flush_arrives():
     assert "已拦截" in result
     assert "Flush, Ace high" in result
     assert result.endswith("Evidence: Recorded hand")
+
+
+def _range_tool_call(equity: float = 62.5) -> ToolCallRecord:
+    result = {
+        "status": "ok",
+        "calculator": {
+            "name": "Pokerit Range Equity",
+            "version": "range_equity.v1",
+            "method": "exact_enumeration",
+            "enumerated_outcomes": 88,
+            "heads_up_only": True,
+        },
+        "analysis_street": "turn",
+        "board": ["9h", "Th", "7c", "Qc"],
+        "scenarios": [
+            {
+                "label": "value-heavy",
+                "equity_pct": equity,
+                "combo_count": 2,
+                "blocked_combo_count": 4,
+                "outcomes_evaluated": 88,
+                "requested_range": [{"hand": "QQ", "weight": 1.0}],
+            },
+        ],
+        "scenario_equity_interval_pct": {"low": equity, "high": equity},
+    }
+    return ToolCallRecord(
+        name="range_equity_calculator",
+        arguments={"villain_ranges": []},
+        result=result,
+        latency_ms=1,
+    )
+
+
+def test_in_game_output_uses_only_matching_calculated_equity_and_provenance():
+    facts = {
+        "category": "one_pair", "made_hand_label": "Pair of Nines",
+        "equity_calculation": None,
+    }
+
+    result = _finalize_in_game_response(
+        "Action: call\nWhy: 对 value-heavy 范围有 62.5% equity。",
+        facts,
+        "Chinese",
+        "算 turn equity",
+        tool_calls=[_range_tool_call()],
+    )
+
+    assert "已拦截" not in result
+    assert "Calculation: Pokerit Range Equity range_equity.v1" in result
+    assert "[QQ] -> 62.5% equity (2 legal combos; 4 blocked; 88 outcomes)" in result
+    assert "assumptions, not recorded facts or solver output" in result
+    assert result.endswith("Evidence: Recorded hand, Exact math, AI strategy judgment")
+
+
+def test_in_game_output_rejects_number_that_disagrees_with_calculator():
+    facts = {
+        "category": "one_pair", "made_hand_label": "Pair of Nines",
+        "equity_calculation": None,
+    }
+
+    result = _finalize_in_game_response(
+        "Action: call\nWhy: equity 大约 24%–27%。",
+        facts,
+        "Chinese",
+        "算 turn equity",
+        tool_calls=[_range_tool_call(62.5)],
+    )
+
+    assert "已拦截" in result
+    assert "24%" not in result
+    assert "精确枚举结果不一致" in result
+
+
+def test_numeric_equity_request_fails_closed_when_model_skips_tool():
+    facts = {
+        "category": "one_pair", "made_hand_label": "Pair of Nines",
+        "equity_calculation": None,
+    }
+
+    result = _finalize_in_game_response(
+        "Action: call\nWhy: 这个点很接近。",
+        facts,
+        "Chinese",
+        "请算 equity 区间",
+        require_range_equity=True,
+    )
+
+    assert "已拦截" in result
+    assert "没有得到有效的范围枚举结果" in result
+
+
+def test_range_calculation_and_preflop_evidence_keep_separate_labels():
+    facts = {
+        "category": "one_pair", "made_hand_label": "Pair of Nines",
+        "equity_calculation": None,
+    }
+
+    result = _finalize_in_game_response(
+        "Action: call\nWhy: 62.5% equity。",
+        facts,
+        "Chinese",
+        tool_calls=[_range_tool_call()],
+        evidence_sources=[{"type": "preflop_strategy_api"}],
+    )
+
+    assert result.endswith(
+        "Evidence: Recorded hand, Exact math, Preflop strategy API, AI strategy judgment"
+    )
+    assert "Solver result" not in result

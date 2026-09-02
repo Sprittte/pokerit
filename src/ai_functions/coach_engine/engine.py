@@ -21,6 +21,9 @@ from collections.abc import AsyncIterator
 
 from sqlalchemy.orm import Session
 
+from ai_functions.tools.executors import make_range_equity_calculator_tool
+from ai_functions.tools.loop import ToolCallRecord, run_tool_loop
+from ai_functions.tools.schemas import IN_GAME_COACH_TOOL_SCHEMAS
 from poker_engine.db.models import Conversation, Message
 from shared_services.decision_facts import hand_description_conflicts
 from shared_services.llm import TokenUsage, stream_chat_with_usage
@@ -39,10 +42,22 @@ _EQUITY_NUMBER_RE = re.compile(
     r"|\d+(?:\.\d+)?\s*%.{0,80}(?:equity|win\s*rate|胜率|权益|赢率)"
 )
 _EQUITY_TOPIC_RE = re.compile(r"(?is)(?:equity|win\s*rate|胜率|权益|赢率)")
+_NUMERIC_EQUITY_REQUEST_RE = re.compile(
+    r"(?is)(?:equity|win\s*rate|胜率|权益|赢率).{0,30}"
+    r"(?:多少|区间|数值|百分比|算|计算|calculate|compute|range|number|%)"
+    r"|(?:算|计算|calculate|compute|give|show).{0,30}"
+    r"(?:equity|win\s*rate|胜率|权益|赢率)"
+)
 _PERCENT_RE = re.compile(r"\d+(?:\.\d+)?\s*%")
+_PERCENT_VALUE_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%")
 _DEFERRED_WORK_RE = re.compile(
     r"(?is)(?:下一(?:条|轮|次回复)|下条|next\s+(?:message|reply|turn)).{0,80}"
     r"(?:可以|会|帮|算|分析|分组|can|will|calculate|analy[sz]e|group)"
+)
+_FLOP_REQUEST_RE = re.compile(r"(?is)\bflop\b|翻牌|前三张.{0,4}牌")
+_TURN_REQUEST_RE = re.compile(
+    r"(?is)\bturn\b|转牌|第四张.{0,4}牌|不看.{0,8}第五张|河牌.{0,4}(?:前|之前)"
+    r"|before.{0,12}river|without.{0,12}river"
 )
 
 CORE_COACH_PROMPT = """# Role and objective
@@ -118,6 +133,10 @@ hand. If the user asks about one spot, answer only that spot.
 IN_GAME_TASK_PROMPT = """# Task: current in-game decision
 Recommend the best next action from the current table state. Give an exact size in
 chips and BB for bets or raises. Discuss prior action only if it changes this choice.
+
+For numeric postflop equity, call the range-equity tool with explicit ranges. Use
+earlier `board_street` only when requested. Quote results exactly; never derive
+postflop ranges from PokerAI.
 
 Output only the useful fields:
 - `Action:` the recommended action and size.
@@ -198,53 +217,157 @@ def _in_game_fact_conflict(text: str, hand_facts: dict | None) -> bool:
     return hand_description_conflicts(text, hand_facts)
 
 
+def _requested_earlier_board_streets(user_text: str) -> set[str]:
+    requested: set[str] = set()
+    if _FLOP_REQUEST_RE.search(user_text):
+        requested.add("flop")
+    if _TURN_REQUEST_RE.search(user_text):
+        requested.add("turn")
+    return requested
+
+
+def _latest_range_equity_result(
+    tool_calls: list[ToolCallRecord] | None,
+) -> dict | None:
+    for call in reversed(tool_calls or []):
+        if (
+            call.name == "range_equity_calculator"
+            and isinstance(call.result, dict)
+            and call.result.get("status") == "ok"
+        ):
+            return call.result
+    return None
+
+
+def _format_number(value: object) -> str:
+    number = float(value)
+    return f"{number:.2f}".rstrip("0").rstrip(".")
+
+
+def _range_equity_summary(result: dict) -> str:
+    calculator = result.get("calculator") or {}
+    lines = [
+        "Calculation: "
+        f"{calculator.get('name')} {calculator.get('version')}; "
+        f"{calculator.get('method')}; board={result.get('analysis_street')} "
+        f"{' '.join(result.get('board') or [])}; "
+        f"{calculator.get('enumerated_outcomes')} outcomes."
+    ]
+    for scenario in result.get("scenarios") or []:
+        range_text = ", ".join(
+            (
+                str(item.get("hand"))
+                if float(item.get("weight", 1)) == 1
+                else f"{item.get('hand')}@{_format_number(float(item.get('weight')) * 100)}%"
+            )
+            for item in scenario.get("requested_range") or []
+        )
+        lines.append(
+            f"- {scenario.get('label')}: [{range_text}] -> "
+            f"{_format_number(scenario.get('equity_pct'))}% equity "
+            f"({scenario.get('combo_count')} legal combos; "
+            f"{scenario.get('blocked_combo_count')} blocked; "
+            f"{scenario.get('outcomes_evaluated')} outcomes)."
+        )
+    interval = result.get("scenario_equity_interval_pct") or {}
+    lines.append(
+        "- Scenario interval: "
+        f"{_format_number(interval.get('low'))}%–{_format_number(interval.get('high'))}%; "
+        "range definitions are assumptions, not recorded facts or solver output."
+    )
+    return "\n".join(lines)
+
+
+def _equity_claims_match_result(text: str, user_text: str, result: dict) -> bool:
+    mentions_equity_number = bool(
+        _EQUITY_NUMBER_RE.search(text)
+        or (_EQUITY_TOPIC_RE.search(user_text) and _PERCENT_RE.search(text))
+    )
+    if not mentions_equity_number:
+        return True
+    claimed = [float(match.group(1)) for match in _PERCENT_VALUE_RE.finditer(text)]
+    interval = result.get("scenario_equity_interval_pct") or {}
+    allowed = [
+        float(scenario.get("equity_pct"))
+        for scenario in result.get("scenarios") or []
+    ]
+    allowed.extend([float(interval.get("low")), float(interval.get("high"))])
+    return all(
+        any(abs(value - expected) <= 0.51 for expected in allowed)
+        for value in claimed
+    )
+
+
 def _finalize_in_game_response(
     text: str,
     hand_facts: dict | None,
     language: str,
     user_text: str = "",
     evidence_sources: list[dict] | None = None,
+    tool_calls: list[ToolCallRecord] | None = None,
+    require_range_equity: bool = False,
 ) -> str:
     """Apply code-owned evidence and fail closed on unsupported live claims."""
     clean = _EVIDENCE_LINE_RE.sub("", text).strip()
+    equity_result = _latest_range_equity_result(tool_calls)
     conflict = _in_game_fact_conflict(clean, hand_facts)
     unsupported_equity = bool(
         (
             _EQUITY_NUMBER_RE.search(clean)
             or (_EQUITY_TOPIC_RE.search(user_text) and _PERCENT_RE.search(clean))
         )
-        and not (hand_facts or {}).get("equity_calculation")
+        and not equity_result
     )
+    mismatched_equity = bool(
+        equity_result
+        and not _equity_claims_match_result(clean, user_text, equity_result)
+    )
+    missing_required_equity = bool(require_range_equity and not equity_result)
     deferred_work = bool(_DEFERRED_WORK_RE.search(clean))
-    if conflict or unsupported_equity or deferred_work:
+    if (
+        conflict
+        or unsupported_equity
+        or mismatched_equity
+        or missing_required_equity
+        or deferred_work
+    ):
         label = (hand_facts or {}).get("made_hand_label") or "unknown"
         if language == "Chinese":
-            reason = (
-                f"模型描述与确定性牌力冲突；你的已知成牌是 {label}。"
-                if conflict else
-                (
-                    f"当前快照没有带计算来源的 equity 结果；模型给出的具体区间未被采用。"
+            if conflict:
+                reason = f"模型描述与确定性牌力冲突；你的已知成牌是 {label}。"
+            elif unsupported_equity:
+                reason = (
+                    "当前快照没有带计算来源的 equity 结果；模型给出的具体区间未被采用。"
                     f"你的确定性成牌是 {label}。"
-                    if unsupported_equity else
-                    "答复试图把当前工作推迟到下一条消息，因此没有把这个承诺展示为有效计划。"
                 )
-            )
+            elif mismatched_equity:
+                reason = "模型给出的 equity 数字与本轮精确枚举结果不一致，因此没有采用。"
+            elif missing_required_equity:
+                reason = "用户要求了数值 equity，但本轮没有得到有效的范围枚举结果。"
+            else:
+                reason = "答复试图把当前工作推迟到下一条消息，因此没有把这个承诺展示为有效计划。"
             evidence = "Recorded hand" if hand_facts else "AI strategy judgment"
             return (
                 "Action: **已拦截这条建议，请重试当前问题。**\n\n"
                 f"Why: {reason}\n\n"
                 f"Evidence: {evidence}"
             )
-        reason = (
-            f"The model description conflicts with the deterministic hand: {label}."
-            if conflict else
-            (
-                f"No calculator provenance was supplied for numeric equity. The stated range was discarded. "
+        if conflict:
+            reason = f"The model description conflicts with the deterministic hand: {label}."
+        elif unsupported_equity:
+            reason = (
+                "No calculator provenance was supplied for numeric equity. The stated range was discarded. "
                 f"The deterministic made hand is {label}."
-                if unsupported_equity else
-                "The reply deferred the current work to a later message, so that promise was not accepted as a valid plan."
             )
-        )
+        elif mismatched_equity:
+            reason = "The stated equity values do not match this turn's exact enumeration and were discarded."
+        elif missing_required_equity:
+            reason = "Numeric equity was requested, but this turn produced no valid range enumeration."
+        else:
+            reason = (
+                "The reply deferred the current work to a later message, so that "
+                "promise was not accepted as a valid plan."
+            )
         evidence = "Recorded hand" if hand_facts else "AI strategy judgment"
         return (
             "Action: **This recommendation was blocked; retry the current question.**\n\n"
@@ -258,12 +381,15 @@ def _finalize_in_game_response(
     labels: list[str] = []
     if hand_facts or "engine_state" in source_types:
         labels.append("Recorded hand")
+    if equity_result:
+        labels.append("Exact math")
     if "preflop_strategy_api" in source_types:
         labels.append("Preflop strategy API")
     elif "range_knowledge_base" in source_types:
         labels.append("Preflop range chart")
     labels.append("AI strategy judgment")
-    return f"{clean}\n\nEvidence: {', '.join(labels)}"
+    calculation = f"\n\n{_range_equity_summary(equity_result)}" if equity_result else ""
+    return f"{clean}{calculation}\n\nEvidence: {', '.join(labels)}"
 
 
 def build_scenario_context(source) -> str:
@@ -391,6 +517,7 @@ async def chat(
     scenario_context: str | None = None,
     decision_facts: dict | None = None,
     evidence_sources: list[dict] | None = None,
+    equity_context: dict | None = None,
 ) -> AsyncIterator[str]:
     """Stream an assistant reply for `user_text` in the given conversation.
 
@@ -447,28 +574,61 @@ async def chat(
 
     async def _generate() -> AsyncIterator[str]:
         nonlocal usage
-        async for chunk in stream_chat_with_usage(
-            msgs,
-            model=MODEL,
-            max_tokens=MAX_REPLY_TOKENS,
-            temperature=TEMPERATURE,
-            log_context={
-                "user_id": str(conv.user_id),
-                "conversation_id": str(conversation_id),
-                "game_id": str(conv.game_id) if conv.game_id else None,
-            },
-        ):
-            if isinstance(chunk, TokenUsage):
-                usage = chunk
-            else:
-                full_text.append(chunk)
-                if coach_scenario != "in_game":
-                    yield chunk
+        tool_calls: list[ToolCallRecord] = []
+        log_context = {
+            "user_id": str(conv.user_id),
+            "conversation_id": str(conversation_id),
+            "game_id": str(conv.game_id) if conv.game_id else None,
+        }
+        can_calculate_range_equity = bool(
+            coach_scenario == "in_game"
+            and equity_context
+            and len(equity_context.get("hole") or []) == 2
+            and len(equity_context.get("board") or []) in (3, 4, 5)
+            and equity_context.get("active_players") == 2
+        )
+        if can_calculate_range_equity:
+            loop_result = await run_tool_loop(
+                messages=msgs,
+                model=MODEL,
+                tools=IN_GAME_COACH_TOOL_SCHEMAS,
+                executors={
+                    "range_equity_calculator": make_range_equity_calculator_tool(
+                        equity_context["hole"],
+                        equity_context["board"],
+                        _requested_earlier_board_streets(user_text),
+                    ),
+                },
+                max_tokens=MAX_REPLY_TOKENS,
+                temperature=TEMPERATURE,
+                log_context=log_context,
+            )
+            usage = loop_result.usage
+            tool_calls = loop_result.tool_calls
+            full_text.append(loop_result.final_text)
+        else:
+            async for chunk in stream_chat_with_usage(
+                msgs,
+                model=MODEL,
+                max_tokens=MAX_REPLY_TOKENS,
+                temperature=TEMPERATURE,
+                log_context=log_context,
+            ):
+                if isinstance(chunk, TokenUsage):
+                    usage = chunk
+                else:
+                    full_text.append(chunk)
+                    if coach_scenario != "in_game":
+                        yield chunk
 
         if coach_scenario == "in_game":
             finalized = _finalize_in_game_response(
                 "".join(full_text), decision_facts, response_language, user_text,
-                evidence_sources,
+                evidence_sources, tool_calls,
+                require_range_equity=bool(
+                    can_calculate_range_equity
+                    and _NUMERIC_EQUITY_REQUEST_RE.search(user_text)
+                ),
             )
             full_text[:] = [finalized]
             yield finalized

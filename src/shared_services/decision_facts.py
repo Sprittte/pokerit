@@ -118,8 +118,8 @@ def build_hand_facts(hole: list[str] | None, board: list[str] | None) -> dict[st
         "rank_key": list(rank_key),
         "pair_context": _pair_context(hole_cards, board_cards, category),
         "draws": _draw_structures(hole_cards, board_cards, category),
-        # Reserved for a future range-aware calculator.  A numeric equity claim
-        # is unsupported until this carries explicit calculator provenance.
+        # Populated only for a concrete calculation turn. Numeric equity stays
+        # unsupported until explicit calculator provenance is available.
         "equity_calculation": None,
     }
 

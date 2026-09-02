@@ -57,6 +57,30 @@ class NewConversationRequest(BaseModel):
     hand_id: uuid.UUID | None = None
 
 
+def _build_live_equity_context(
+    round_state: dict, hero_uuid: str,
+) -> dict | None:
+    """Bind only public board cards and Hero's cards for heads-up calculation."""
+    live_players = [
+        seat for seat in round_state.get("seats") or []
+        if seat.get("state") in {"participating", "allin"}
+    ]
+    hero_hole = (round_state.get("hole_cards_by_uuid") or {}).get(hero_uuid) or []
+    board = round_state.get("community_card") or []
+    if (
+        len(live_players) != 2
+        or not any(seat.get("uuid") == hero_uuid for seat in live_players)
+        or len(hero_hole) != 2
+        or len(board) not in (3, 4, 5)
+    ):
+        return None
+    return {
+        "hole": list(hero_hole),
+        "board": list(board),
+        "active_players": 2,
+    }
+
+
 @router.post("/conversations")
 def create_conversation(
     body: NewConversationRequest,
@@ -157,6 +181,7 @@ async def coach_chat(
     scenario_context: str | None = None
     decision_facts: dict | None = None
     evidence_sources: list[dict] | None = None
+    equity_context: dict | None = None
     if body.game_id is not None:
         session = manager.get(str(body.game_id))
         if session is not None:
@@ -175,6 +200,9 @@ async def coach_chat(
                 decision_facts = build_hand_facts(
                     (round_state.get("hole_cards_by_uuid") or {}).get(session.hero_uuid),
                     round_state.get("community_card") or [],
+                )
+                equity_context = _build_live_equity_context(
+                    round_state, session.hero_uuid,
                 )
                 preflop_snapshot = build_live_preflop_snapshot(
                     round_state, session.hero_uuid,
@@ -233,6 +261,7 @@ async def coach_chat(
                 scenario_context=scenario_context,
                 decision_facts=decision_facts,
                 evidence_sources=evidence_sources,
+                equity_context=equity_context,
             )
             async for chunk in generator:
                 payload = json.dumps({"type": "chunk", "text": chunk})

@@ -26,6 +26,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   exact range-pack actions and auditable hand-level preflop evidence.
 - Added shared deterministic coaching facts for made hands, best-five cards,
   pair context, structural draws, and canonical check/bet/call/raise semantics.
+- Added exact heads-up postflop equity enumeration for live coaching against
+  explicit range scenarios, with code-bound cards, visible assumptions and
+  combo/outcome provenance, and fail-closed percentage validation.
 - Added regression coverage for early game termination, game-length limits,
   table action serialization, preflop classification, coach context/language,
   VPIP sampling, evidence wording, and evaluation synthesis.

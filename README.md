@@ -74,6 +74,16 @@ user-supplied reads, and actual solver evidence.
 `AI GTO` is a configured simulation style; it is never presented as proof that
 a solver node was queried.
 
+For heads-up postflop equity questions during a live training hand, the coach
+can run an exact enumerator against one to three explicit opponent-range
+scenarios. Hero cards and board cards are bound from the engine, and an earlier
+flop or turn board can be selected only when the user asks for that street. The
+reply shows the range assumptions, legal and blocked combo counts, enumerated
+outcomes, per-scenario equity, and the resulting scenario interval. The math is
+labelled `Exact math`; the chosen opponent ranges remain `AI strategy judgment`,
+not recorded facts or solver output. PokerAI preflop evidence is never reused as
+a postflop opponent range.
+
 #### Optional higher-fidelity preflop evidence
 
 For more precise **6-max 100BB cash** preflop frequencies and action lines beyond
