@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 
 # Delay between streamed events so bot actions animate sequentially in the UI.
 EVENT_DELAY_S = 0.45
+SHOWDOWN_REVEAL_DELAY_S = 1.5
 
 
 def _ended_a_hand(events: list[dict]) -> bool:
@@ -153,6 +154,9 @@ async def _stream(websocket: WebSocket, events: list[dict]) -> None:
             n_pots = max(1, len([p for p in event.get("pot_winners", [])
                                  if p.get("winners") and p.get("amount", 0) > 0]))
             await asyncio.sleep(n_pots * 1.35 + 2.0)
+        elif event["type"] == "showdown_reveal":
+            # Let all-in cards settle face-up before running the remaining board.
+            await asyncio.sleep(SHOWDOWN_REVEAL_DELAY_S)
         elif event["type"] == "new_street":
             # Give the client time to slide the street's bets into the pot
             # before the next card/action arrives.
@@ -186,6 +190,8 @@ async def _stream_gen(websocket: WebSocket, gen) -> bool:
             n_pots = max(1, len([p for p in finish_ev.get("pot_winners", [])
                                  if p.get("winners") and p.get("amount", 0) > 0]))
             await asyncio.sleep(n_pots * 1.35 + 2.0)
+        elif "showdown_reveal" in types:
+            await asyncio.sleep(SHOWDOWN_REVEAL_DELAY_S)
         elif "new_street" in types:
             await asyncio.sleep(0.8)
         elif "to_act" in types:

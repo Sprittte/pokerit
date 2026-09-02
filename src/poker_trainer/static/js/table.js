@@ -97,10 +97,24 @@
     return [x + (50 - x) * 0.25, 70];
   }
 
-  function seatActionBadge(seat) {
+  function seatActionBadge(seat, terminal) {
     let action = "";
     let label = "";
-    if (seat.state === "folded") {
+    if (terminal) {
+      if (terminal.status === "win") {
+        action = "win";
+        label = "WIN";
+      } else if (terminal.status === "showdown") {
+        action = "showdown";
+        label = terminal.was_allin ? "ALL-IN · SHOWDOWN" : "SHOWDOWN";
+      } else if (terminal.status === "mucked") {
+        action = "mucked";
+        label = "MUCKED";
+      } else if (terminal.status === "fold") {
+        action = "fold";
+        label = "FOLD";
+      }
+    } else if (seat.state === "folded" && !seat.is_sitting_out) {
       action = "fold";
       label = "FOLD";
     } else if (seat.state === "allin") {
@@ -130,7 +144,7 @@
     const badge = document.createElement("div");
     badge.className = `seat-action action-${action}`;
     badge.textContent = label;
-    badge.title = `Last action: ${label}`;
+    badge.title = terminal ? `Hand result: ${label}` : `Last action: ${label}`;
     return badge;
   }
 
@@ -150,6 +164,11 @@
       this.raiseAmountReady = false; // R is armed only after the player chooses/edits a size
       this.stats = {};         // uuid -> {name, played, won, net}
       this.hands = [];         // completed hand summaries
+      this.showdown = null;
+      this.winnerUuids = null;
+      this.terminalStatuses = null;
+      this.revealedCards = {};
+      this.visibleHandNum = null;
       this._coachConversationId = null;
       this._coachHandNum = null;
       this._coachContextVersion = 0;
@@ -358,14 +377,20 @@
           // slide them into the pot, then reveal the new street's view/card.
           this.collectBetsThenRender(ev);
           break;
+        case "showdown_reveal":
+          this.rememberRevealed(ev.revealed);
+          if (this.lastView) this.render(this.lastView);
+          this.setMessage("All-in — live hands shown");
+          break;
         case "round_finish":
           // Stash showdown info so render() can show hand labels and dim the
           // winner's unused cards. Cleared by the next non-showdown render.
           this.showdown = {};
           (ev.showdown || []).forEach((s) => (this.showdown[s.uuid] = s));
           this.winnerUuids = new Set((ev.winners || []).map((w) => typeof w === "string" ? w : w.uuid));
+          this.terminalStatuses = ev.terminal_statuses || null;
+          this.rememberRevealed(ev.revealed);
           if (ev.view) this.render(ev.view);
-          this.revealShowdown(ev.revealed);
           this.recordHand(ev);
           this.announceWinners(ev.winners, ev.view);
           this.animatePotAward(ev.pot_winners, ev.view);
@@ -395,6 +420,16 @@
 
     // ---- rendering ----
     render(view, actingUuid) {
+      if (this.visibleHandNum !== view.round_count) {
+        this.visibleHandNum = view.round_count;
+        this.revealedCards = {};
+        this.terminalStatuses = null;
+      }
+      (view.seats || []).forEach((seat) => {
+        if (this.revealedCards[seat.uuid]) {
+          seat.hole_cards = this.revealedCards[seat.uuid];
+        }
+      });
       this.lastView = view;
       if (view.street) this.street = view.street;
       this.onCoachHand(view.round_count);
@@ -463,6 +498,8 @@
       const rotatedSeats = shifted.length <= 1 ? shifted
         : [shifted[0], ...shifted.slice(1).reverse()];
       rotatedSeats.forEach((seat, i) => {
+        const terminal = this.terminalStatuses ? this.terminalStatuses[seat.uuid] : null;
+        const isMucked = terminal && terminal.status === "mucked";
         const [x, y] = this.seatPos[i] || [50, 50];
         const el = document.createElement("div");
         const region = seatRegion(x, y, seat.is_hero);
@@ -494,7 +531,7 @@
         if (seat.hole_cards) {
           seat.hole_cards.forEach((c) =>
             hole.appendChild(cardEl(c, { hero: seat.is_hero, dimmed: dimCard(c) })));
-        } else if (seat.state !== "folded") {
+        } else if (seat.state !== "folded" && !seat.is_sitting_out && !isMucked) {
           hole.appendChild(cardEl("back", { hero: seat.is_hero }));
           hole.appendChild(cardEl("back", { hero: seat.is_hero }));
         }
@@ -525,7 +562,7 @@
         if (!seat.is_hero) {
           const actionSlot = document.createElement("div");
           actionSlot.className = "seat-action-slot";
-          const actionBadge = seatActionBadge(seat);
+          const actionBadge = seatActionBadge(seat, terminal);
           if (actionBadge) actionSlot.appendChild(actionBadge);
           meta.appendChild(actionSlot);
         }
@@ -579,12 +616,11 @@
       }, SLIDE_MS + 60);
     }
 
-    revealShowdown(revealed) {
+    rememberRevealed(revealed) {
       if (!revealed) return;
-      // update lastView seats with revealed cards then re-render (keeps positions)
-      if (!this.lastView) return;
-      this.lastView.seats.forEach((s) => { if (revealed[s.uuid]) s.hole_cards = revealed[s.uuid]; });
-      this.render(this.lastView);
+      Object.entries(revealed).forEach(([uuid, cards]) => {
+        this.revealedCards[uuid] = cards;
+      });
     }
 
     announceWinners(winners, view) {
@@ -781,7 +817,8 @@
       this.hands.push({
         n: v.round_count, board,
         heroCards: hero ? hero.hole_cards : null,
-        revealed: ev.revealed || {},
+        revealed: ev.history_revealed || ev.revealed || {},
+        terminalStatuses: ev.terminal_statuses || {},
         winners: winnerNames,
         seats: v.seats.map((s) => ({ uuid: s.uuid, name: s.name })),
       });
@@ -817,12 +854,14 @@
         const reveals = Object.entries(h.revealed).map(([u, c]) => {
           const nm = (h.seats.find((s) => s.uuid === u) || {}).name || "?";
           const cards = c.map((x) => cardInline(x)).join(" ");
-          return `${esc(nm)}: ${cards}`;
+          const terminal = h.terminalStatuses[u];
+          const suffix = terminal && terminal.status === "mucked" ? " (mucked)" : "";
+          return `${esc(nm)}${suffix}: ${cards}`;
         }).join(" · ");
         return `<div class="hand-entry"><b>Hand #${h.n}</b>` +
           `<div class="board">${board || '<span class="muted tiny">no board</span>'}</div>` +
           `<div class="tiny">You: ${heroC}</div>` +
-          (reveals ? `<div class="tiny muted">Shown — ${reveals}</div>` : "") +
+          (reveals ? `<div class="tiny muted">Showdown cards — ${reveals}</div>` : "") +
           `<div class="tiny win">Winner: ${h.winners.join(", ")}</div></div>`;
       }).join("") || '<p class="muted">No completed hands yet.</p>';
     }

@@ -69,11 +69,17 @@ def build_view(
     community = community_override if community_override is not None else board
     street = _STREET_NAMES.get(current_street_index, "preflop")
     last_actions = last_actions_for_street(action_histories, street)
+    folded_uuids = {
+        str(entry.get("uuid"))
+        for actions in (action_histories or {}).values()
+        for entry in actions
+        if entry.get("uuid")
+        and str(entry.get("action", "")).upper() == "FOLD"
+    }
 
     if state is not None:
         stacks_view = [state.stacks[seat_to_pk[i]] if seat_to_pk[i] >= 0 else stacks[i] for i in range(n)]
         bets = [state.bets[seat_to_pk[i]] if seat_to_pk[i] >= 0 else 0 for i in range(n)]
-        statuses = [state.statuses[seat_to_pk[i]] if seat_to_pk[i] >= 0 else False for i in range(n)]
         pot = pk_adapter.pot_dict(state)
         pot_with_uuids = {
             "main": pot["main"],
@@ -85,7 +91,6 @@ def build_view(
     else:
         stacks_view = list(stacks)
         bets = [0] * n
-        statuses = [True] * n
         pot_with_uuids = {"main": {"amount": 0}, "side": []}
 
     seats = []
@@ -94,17 +99,14 @@ def build_view(
         meta = seat_meta[uuid_]
         is_hero = i == hero_index
         pk_i = seat_to_pk[i]
-        is_busted = stacks[i] == 0 and (state is None or pk_i < 0)
-        if is_busted:
+        is_sitting_out = i not in active_seats
+        if is_sitting_out or uuid_ in folded_uuids:
             state_str = "folded"
-        elif statuses[i]:
-            state_str = "participating"
-            if state is not None and pk_i >= 0 and state.stacks[pk_i] == 0:
-                state_str = "allin"
+        elif state is not None and state.status and pk_i >= 0 and state.stacks[pk_i] == 0:
+            state_str = "allin"
         else:
-            state_str = "folded"
+            state_str = "participating"
         show_style = bool(meta.get("is_bot")) and not meta.get("hidden")
-        is_sitting_out = stacks[i] == 0
         seat_pos = _pos_label(i, btn_pos, active_seats) if not is_sitting_out else ""
         seats.append({
             "pos": i,
@@ -112,6 +114,7 @@ def build_view(
             "name": spec.name,
             "stack": stacks_view[i],
             "state": state_str,
+            "is_sitting_out": is_sitting_out,
             "is_hero": is_hero,
             "is_bot": bool(meta.get("is_bot")),
             "style": meta.get("style") if show_style else None,
@@ -174,10 +177,13 @@ def build_round_state(
         [state.stacks[seat_to_pk[i]] if seat_to_pk[i] >= 0 else stacks[i] for i in range(n)]
         if state else list(stacks)
     )
-    statuses = (
-        [state.statuses[seat_to_pk[i]] if seat_to_pk[i] >= 0 else False for i in range(n)]
-        if state else [True] * n
-    )
+    folded_uuids = {
+        str(entry.get("uuid"))
+        for actions in action_histories.values()
+        for entry in actions
+        if entry.get("uuid")
+        and str(entry.get("action", "")).upper() == "FOLD"
+    }
 
     pot = {"main": {"amount": 0}, "side": []}
     if state:
@@ -193,15 +199,22 @@ def build_round_state(
     if pot_total_override is not None:
         pot["main"]["amount"] = pot_total_override
 
-    seats = [
-        {
-            "uuid": seat_uuids[i],
+    seats = []
+    for i in range(n):
+        pk_i = seat_to_pk[i]
+        uuid_ = seat_uuids[i]
+        if i not in active_seats or uuid_ in folded_uuids:
+            state_str = "folded"
+        elif state and state.status and pk_i >= 0 and state.stacks[pk_i] == 0:
+            state_str = "allin"
+        else:
+            state_str = "participating"
+        seats.append({
+            "uuid": uuid_,
             "name": config.seats[i].name,
             "stack": effective_stacks[i],
-            "state": "participating" if statuses[i] else "folded",
-        }
-        for i in range(n)
-    ]
+            "state": state_str,
+        })
 
     return {
         "street": _STREET_NAMES.get(current_street_index, "preflop"),

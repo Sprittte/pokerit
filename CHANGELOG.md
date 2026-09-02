@@ -8,6 +8,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Added account-level `Realistic` and `Training` showdown visibility modes;
+  training mode tables every bot that reaches showdown.
+- Added pre-runout live-card reveals after called all-ins close betting, plus
+  saved-hand visibility for hands that called the final river bet.
 - Added an in-table End game action that saves every completed hand, discards
   only the active unfinished hand, and closes the game cleanly.
 - Added visible `F`, `C`, `R`, and `1`-`4` table shortcuts. Keyboard raises are
@@ -60,6 +64,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Fixed terminal showdown participants being displayed as `FOLD`; live table
+  badges now distinguish `WIN`, `SHOWDOWN`, `MUCKED`, and actual `FOLD` results.
+- Fixed saved hand details silently omitting unrevealed showdown contenders by
+  listing them explicitly as `MUCKED`, without exposing their cards.
 - Fixed RFI range-pack matching after players fold before the hero, so supported
   late-position first-in decisions are no longer incorrectly limited to UTG.
 - Fixed preflop coaching narratives so SB completes and over-limps cannot be

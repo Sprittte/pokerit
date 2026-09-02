@@ -258,6 +258,9 @@ textarea { background: var(--bg); border: 1px solid #333c48; color: var(--text);
 .seat-action.action-call { color: #a9d6ff; background: rgba(24, 61, 96, .94); }
 .seat-action.action-raise { color: #ffe08a; background: rgba(92, 66, 16, .95); }
 .seat-action.action-allin { color: #efc3ff; background: rgba(84, 31, 99, .96); }
+.seat-action.action-win { color: #fff3a8; background: rgba(87, 70, 13, .97); }
+.seat-action.action-showdown { color: #c7f2ff; background: rgba(23, 70, 85, .96); }
+.seat-action.action-mucked { color: #c8cbd2; background: rgba(52, 55, 63, .96); }
 @keyframes actionBadgeIn {
   from { transform: scale(.82); opacity: .35; }
   to { transform: scale(1); opacity: 1; }
@@ -543,6 +546,8 @@ textarea { background: var(--bg); border: 1px solid #333c48; color: var(--text);
 /* Showdown hand label. */
 .hand-label { color: var(--muted); font-size: 0.85rem; font-style: italic; margin-left: 0.4rem; }
 .showdown-list li { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.3rem; }
+.showdown-status { font-size: .72rem; font-weight: 850; letter-spacing: .04em; }
+.showdown-status.mucked { color: #aeb3bd; }
 .pot-summary { margin-top: 0.5rem; }
 .result-line { font-size: 0.95rem; font-weight: 600; }
 

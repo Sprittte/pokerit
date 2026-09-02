@@ -630,9 +630,10 @@
     html += streetBlock("Turn", d.streets.turn);
     html += streetBlock("River", d.streets.river);
 
-    // Showdown: revealed cards + hand values.
-    if (d.had_showdown && d.showdown_hands && d.showdown_hands.length) {
-      const sdRows = d.showdown_hands.map(sh => {
+    // Showdown: known cards + hand values, with unrevealed live hands marked
+    // explicitly as mucked rather than silently disappearing from the result.
+    if (d.had_showdown) {
+      const shownRows = (d.showdown_hands || []).map(sh => {
         const winTag = sh.is_winner
           ? ` <span class="win">wins ${sh.amount_won.toLocaleString()}</span>` : "";
         return `<li>
@@ -640,7 +641,12 @@
           ${cardsHTML(sh.hole_cards)}
           <span class="hand-label">${sh.hand_label}</span>${winTag}
         </li>`;
-      }).join("");
+      });
+      const muckedRows = (d.mucked_players || []).map(p => `<li>
+        ${pnameHTML(p.name, p.is_hero, p.position)}:
+        <span class="showdown-status mucked">MUCKED</span>
+      </li>`);
+      const sdRows = shownRows.concat(muckedRows).join("");
       // Final pot breakdown.
       const fp = d.final_pot || {};
       const mainAmt = (fp.main || {}).amount || d.pot_total;
@@ -649,7 +655,7 @@
         potLine += ` · Side pot ${i + 1}: ${sp.amount.toLocaleString()}`;
       });
       html += `<div class="street"><h3>Showdown</h3>` +
-        `<ul class="hand-players showdown-list">${sdRows}</ul>` +
+        `<ul class="hand-players showdown-list">${sdRows || '<li class="muted">No cards shown</li>'}</ul>` +
         `<p class="muted tiny pot-summary">${potLine}</p></div>`;
     }
 
@@ -811,6 +817,8 @@
     $("pf-language").value = p.language || "";
     $("pf-avatar-url").value = p.avatar_url || "";
     const shortcuts = (p.preferences || {}).bet_shortcuts_v1 || {};
+    $("pf-showdown-visibility").value =
+      (p.preferences || {}).showdown_visibility_v1 || "realistic";
     const preflopRows = $("pf-preflop-rows"), postflopRows = $("pf-postflop-rows");
     (shortcuts.preflop || [2, 2.5, 6, 7.5]).forEach((v) => addQuickChip(preflopRows, v, "× BB"));
     (shortcuts.postflop || [33, 50, 65, 100]).forEach((v) => addQuickChip(postflopRows, v, "% Pot"));
@@ -833,6 +841,7 @@
             preflop: readQuickChips(preflopRows),
             postflop: readQuickChips(postflopRows),
           },
+          showdown_visibility_v1: $("pf-showdown-visibility").value,
         },
       };
       try {

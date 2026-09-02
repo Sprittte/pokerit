@@ -25,6 +25,7 @@ from poker_trainer.game.manager import manager
 from poker_trainer.game.session import GameSession
 from poker_trainer.preferences import (
     bet_shortcuts_from_preferences,
+    showdown_visibility_from_preferences,
     validate_quick_sizes,
 )
 
@@ -212,6 +213,7 @@ def create_game(req: CreateGameRequest, hero: User = Depends(require_user)) -> C
     session = GameSession(config, hero_index=0, seed=req.seed)
     session.preflop_quick = preflop
     session.postflop_quick = postflop
+    session.showdown_visibility = showdown_visibility_from_preferences(hero.preferences)
     manager.add(session)
     return CreateGameResponse(
         game_id=session.game_id,
@@ -541,8 +543,22 @@ def _build_hand_detail(game: Game, hand: Hand, hero_gp_id) -> dict:
 
     # Hand values at showdown for all revealed players.
     showdown_hands = []
+    mucked_players = []
     if hand.had_showdown:
         for hp in hand.players:
+            participated = hp.starting_stack is None or hp.starting_stack > 0
+            if (
+                participated
+                and hp.game_player_id not in folded_gp_ids
+                and (not hp.hole_cards or not hp.revealed)
+            ):
+                gp = seat_by_gp.get(hp.game_player_id)
+                mucked_players.append({
+                    "name": gp.display_name if gp else "?",
+                    "is_hero": hp.game_player_id == hero_gp_id,
+                    "position": pos_of(hp.game_player_id),
+                })
+                continue
             if not hp.hole_cards or not hp.revealed:
                 continue
             if hp.game_player_id == hero_gp_id and hp.game_player_id in folded_gp_ids:
@@ -580,6 +596,7 @@ def _build_hand_detail(game: Game, hand: Hand, hero_gp_id) -> dict:
         "streets": streets_out,
         "winners": winners,
         "showdown_hands": showdown_hands,
+        "mucked_players": mucked_players,
         "button_pos": hand.button_pos,
     }
 

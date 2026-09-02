@@ -232,11 +232,18 @@ Chat Completions requests use `reasoning_effort="none"` for compatibility.
 
 ### Account preferences
 
-Account Settings stores versioned quick-bet shortcuts used by newly created
-games. Defaults are:
+Account Settings stores versioned quick-bet shortcuts and showdown visibility
+used by newly created games. Defaults are:
 
 - preflop: `2.0`, `2.5`, `6.0`, `7.5` BB;
-- postflop: `33`, `50`, `65`, `100` percent pot.
+- postflop: `33`, `50`, `65`, `100` percent pot;
+- showdown visibility: `Realistic`, which follows normal show/muck order.
+
+`Training` showdown visibility makes every bot that reaches showdown table its
+hand. In either mode, a called all-in tables every live hand before the board
+runs out, and folded hands remain hidden. In `Realistic` mode, cards that are
+inspectable after calling the final river bet remain available in the saved
+hand history even if that hand was mucked at the live table.
 
 Legacy per-game API overrides remain accepted.
 
@@ -249,8 +256,11 @@ Legacy per-game API overrides remain accepted.
   in progress, but already completed hands remain stored.
 - Normal restarts, Mac sleep/wake, and `docker compose down` do not remove the
   database volume.
-- The browser receives only the hero's cards and opponent cards actually
-  revealed at showdown.
+- The browser receives only the hero's cards and opponent cards allowed by the
+  showdown visibility contract: live tabled hands plus completed-hand cards
+  available after a final-river call. Folded cards are never included.
+- Once a called all-in closes all future betting, every live hand is revealed
+  before the remaining board runs out.
 - Fold winners are not classified as showdowns, and hidden opponent cards are
   removed during the visibility-correction migrations.
 

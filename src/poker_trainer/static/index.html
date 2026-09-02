@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Poker Trainer</title>
-  <link rel="stylesheet" href="/static/css/styles.css?v=14" />
+  <link rel="stylesheet" href="/static/css/styles.css?v=15" />
 </head>
 <body>
   <div id="app"></div>
@@ -200,6 +200,18 @@
               </div>
               <div id="pf-postflop-rows" class="quick-chips"></div>
             </div>
+          </div>
+          <div class="settings-section">
+            <h3>Showdown visibility</h3>
+            <label>Bot reveal mode
+              <select id="pf-showdown-visibility">
+                <option value="realistic">Realistic — normal show/muck order</option>
+                <option value="training">Training — all showdown bots show</option>
+              </select>
+            </label>
+            <p class="muted tiny">
+              Called all-ins always reveal every live hand. Folded hands are never revealed.
+            </p>
           </div>
           <p id="pf-error" class="error hidden"></p>
           <p id="pf-saved" class="tiny hidden" style="color:#5fbf6f">Saved ✓</p>
@@ -439,7 +451,7 @@
     </section>
   </template>
 
-  <script src="/static/js/table.js?v=18"></script>
-  <script src="/static/js/app.js?v=12"></script>
+  <script src="/static/js/table.js?v=19"></script>
+  <script src="/static/js/app.js?v=13"></script>
 </body>
 </html>
