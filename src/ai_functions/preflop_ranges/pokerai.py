@@ -17,9 +17,12 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
+from .knowledge import normalize_starting_hand
+
 
 POKERAI_BASE_URL = "https://pokerai.bet"
 DEFAULT_PREFLOP_VERSION = "6max"
+PREFLOP_LOOKUP_LIMIT_PER_HAND = 2
 _ALLOWED_POSITIONS = frozenset({"SB", "BB", "UTG", "MP", "CO", "BTN"})
 _POSITION_MAP = {"HJ": "MP"}
 _ALLOWED_ACTIONS = frozenset({"fold", "call", "raise"})
@@ -30,6 +33,7 @@ _ALLOWED_SITUATIONS = frozenset({"RFI", "Limp", "Raise", "3-Bet", "4-Bet", "5-Be
 class PokerAIQueryResult:
     evidence: dict[str, Any] | None
     failure: str | None = None
+    attempted: bool = False
 
 
 def configured_api_key() -> str | None:
@@ -66,9 +70,10 @@ def _cards(value: Any) -> str | None:
 def build_preflop_request(snapshot: dict[str, Any]) -> dict[str, Any] | None:
     """Build one supported PokerAI request, or fail closed.
 
-    PokerAI's contract accepts the action sequence before Hero's *first*
-    preflop decision and currently exposes 6-max fixed-stack packs.  A later
-    Hero re-decision is deliberately not rewritten into a different node.
+    PokerAI's single-hand contract accepts the action sequence before Hero's
+    first preflop decision. Its whole-range endpoint also exposes later Hero
+    decisions, so a re-decision retains the complete observed action line and
+    is resolved from that endpoint instead of being rewritten into a new node.
     """
     if snapshot.get("street") != "preflop":
         return None
@@ -101,9 +106,10 @@ def build_preflop_request(snapshot: dict[str, Any]) -> dict[str, Any] | None:
         {"position": "BB", "action": "big blind", "amount": 1.0},
     ]
     observed_raises: list[float] = []
+    hero_acted_before = False
     for item in facts.get("action_history_before") or []:
         if item.get("actor") == "Hero":
-            return None
+            hero_acted_before = True
         position = _position(item.get("position"))
         action = str(item.get("action") or "").lower()
         if position is None or action not in _ALLOWED_ACTIONS:
@@ -121,6 +127,7 @@ def build_preflop_request(snapshot: dict[str, Any]) -> dict[str, Any] | None:
         actions.append(row)
 
     return {
+        "table_size": "6max",
         "hole_cards": hole_cards,
         "positions": {"hero": hero_position},
         "preflop_actions": actions,
@@ -128,9 +135,27 @@ def build_preflop_request(snapshot: dict[str, Any]) -> dict[str, Any] | None:
         "_pokerit": {
             "decision_id": snapshot.get("decision_id"),
             "hero_stack_bb": hero_stack_bb,
+            "hand_class": normalize_starting_hand(hole_cards),
+            "use_range_endpoint": hero_acted_before,
             "observed_raise_sizes_bb": observed_raises,
         },
     }
+
+
+def _expected_situation(request_body: dict[str, Any]) -> str:
+    voluntary_actions = [
+        item for item in request_body["preflop_actions"]
+        if item.get("action") in _ALLOWED_ACTIONS
+    ]
+    raises = sum(item.get("action") == "raise" for item in voluntary_actions)
+    return (
+        "Limp" if not raises and voluntary_actions else
+        "RFI" if not raises else
+        "Raise" if raises == 1 else
+        "3-Bet" if raises == 2 else
+        "4-Bet" if raises == 3 else
+        "5-Bet"
+    )
 
 
 def _normalized_strategy(payload: dict[str, Any]) -> list[dict[str, Any]] | None:
@@ -176,19 +201,7 @@ def _evidence_from_response(
 ) -> dict[str, Any] | None:
     situation = str(payload.get("situation") or "")
     strategy = _normalized_strategy(payload)
-    voluntary_actions = [
-        item for item in request_body["preflop_actions"]
-        if item.get("action") in _ALLOWED_ACTIONS
-    ]
-    raises = sum(item.get("action") == "raise" for item in voluntary_actions)
-    expected_situation = (
-        "Limp" if not raises and voluntary_actions else
-        "RFI" if not raises else
-        "Raise" if raises == 1 else
-        "3-Bet" if raises == 2 else
-        "4-Bet" if raises == 3 else
-        "5-Bet"
-    )
+    expected_situation = _expected_situation(request_body)
     if (
         situation not in _ALLOWED_SITUATIONS
         or situation != expected_situation
@@ -201,7 +214,7 @@ def _evidence_from_response(
         "type": "preflop_strategy_api",
         "label": "PokerAI presolved 6-max 100BB preflop reference (fixed, sizing-insensitive pack)",
         "provider": "PokerAI",
-        "endpoint": "/v1/gto/preflop",
+        "endpoint": str(private.get("endpoint") or "/v1/gto/preflop"),
         "version": request_body["preflop_version"],
         "decision_id": private.get("decision_id"),
         "node": situation,
@@ -237,6 +250,37 @@ def _evidence_from_response(
     return evidence
 
 
+def _evidence_from_range_response(
+    payload: dict[str, Any], request_body: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Extract the current hand from a whole-range re-decision response."""
+    private = request_body.get("_pokerit") or {}
+    hand_class = str(private.get("hand_class") or "")
+    ranges = payload.get("range")
+    frequencies = ranges.get(hand_class) if isinstance(ranges, dict) else None
+    if not isinstance(frequencies, dict):
+        return None
+
+    normalized_payload = {
+        "hole_cards": request_body["hole_cards"],
+        "situation": _expected_situation(request_body),
+        "strategy": [
+            {"action": action, "frequency": frequencies.get(action)}
+            for action in ("fold", "call", "raise")
+        ],
+    }
+    if payload.get("quota") is not None:
+        normalized_payload["quota"] = payload["quota"]
+    range_request = {
+        **request_body,
+        "_pokerit": {
+            **private,
+            "endpoint": "/v1/gto/preflop/range",
+        },
+    }
+    return _evidence_from_response(normalized_payload, range_request)
+
+
 async def query_preflop_strategy(
     snapshot: dict[str, Any],
     *,
@@ -251,11 +295,14 @@ async def query_preflop_strategy(
     if not api_token:
         return PokerAIQueryResult(None, "not_configured")
 
+    private = request_body.get("_pokerit") or {}
+    use_range_endpoint = private.get("use_range_endpoint") is True
     public_body = {
         field: value
         for field, value in request_body.items()
-        if field != "_pokerit"
+        if field != "_pokerit" and (field != "hole_cards" or not use_range_endpoint)
     }
+    endpoint = "/v1/gto/preflop/range" if use_range_endpoint else "/v1/gto/preflop"
     owns_client = client is None
     http = client or httpx.AsyncClient(timeout=httpx.Timeout(5.0))
     try:
@@ -263,7 +310,7 @@ async def query_preflop_strategy(
         for attempt in range(attempts):
             try:
                 response = await http.post(
-                    f"{POKERAI_BASE_URL}/v1/gto/preflop",
+                    f"{POKERAI_BASE_URL}{endpoint}",
                     headers={"Authorization": f"Bearer {api_token}"},
                     json=public_body,
                 )
@@ -271,17 +318,24 @@ async def query_preflop_strategy(
                 if attempt + 1 < attempts:
                     await asyncio.sleep(0.25)
                     continue
-                return PokerAIQueryResult(None, "network_error")
+                return PokerAIQueryResult(None, "network_error", attempted=True)
 
             if response.status_code == 200:
                 try:
                     payload = response.json()
                 except ValueError:
-                    return PokerAIQueryResult(None, "invalid_response")
-                evidence = _evidence_from_response(payload, request_body)
+                    return PokerAIQueryResult(
+                        None, "invalid_response", attempted=True,
+                    )
+                evidence = (
+                    _evidence_from_range_response(payload, request_body)
+                    if use_range_endpoint
+                    else _evidence_from_response(payload, request_body)
+                )
                 return PokerAIQueryResult(
                     evidence,
                     None if evidence is not None else "invalid_response",
+                    attempted=True,
                 )
 
             retryable = response.status_code >= 500
@@ -297,10 +351,12 @@ async def query_preflop_strategy(
                 error_code = str(response.json().get("error") or response.status_code)
             except ValueError:
                 error_code = str(response.status_code)
-            return PokerAIQueryResult(None, f"provider_{error_code}")
-        return PokerAIQueryResult(None, "provider_error")
+            return PokerAIQueryResult(
+                None, f"provider_{error_code}", attempted=True,
+            )
+        return PokerAIQueryResult(None, "provider_error", attempted=True)
     except Exception:  # noqa: BLE001 - optional provider must always fail closed
-        return PokerAIQueryResult(None, "client_error")
+        return PokerAIQueryResult(None, "client_error", attempted=True)
     finally:
         if owns_client:
             try:
@@ -329,20 +385,23 @@ async def query_postgame_snapshots(
     limit: int,
     query: Callable[[dict[str, Any]], Awaitable[PokerAIQueryResult]] | None = None,
 ) -> dict[str, Any]:
-    """Query at most one eligible decision per hand, capped per evaluation.
+    """Query up to the per-hand decision limit, capped per evaluation.
 
     The default provider call does not retry, so ``limit`` is also a strict
     upper bound on post-game HTTP requests, not merely selected decisions.
     """
     limit = max(0, int(limit))
     selected: list[dict[str, Any]] = []
-    seen_rounds: set[int] = set()
+    selected_per_round: dict[int, int] = {}
     for snapshot in snapshots:
         round_count = int(snapshot.get("round_count") or 0)
-        if round_count in seen_rounds or build_preflop_request(snapshot) is None:
+        if (
+            selected_per_round.get(round_count, 0) >= PREFLOP_LOOKUP_LIMIT_PER_HAND
+            or build_preflop_request(snapshot) is None
+        ):
             continue
         selected.append(snapshot)
-        seen_rounds.add(round_count)
+        selected_per_round[round_count] = selected_per_round.get(round_count, 0) + 1
         if len(selected) >= limit:
             break
 

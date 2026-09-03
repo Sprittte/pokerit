@@ -33,7 +33,12 @@ from ai_functions.coach_engine.engine import (
     get_or_create_conversation,
 )
 from ai_functions.decision_snapshot import build_live_preflop_snapshot
-from ai_functions.preflop_ranges import apply_pokerai_evidence, query_preflop_strategy
+from ai_functions.preflop_ranges import (
+    PREFLOP_LOOKUP_LIMIT_PER_HAND,
+    PokerAIQueryResult,
+    apply_pokerai_evidence,
+    query_preflop_strategy,
+)
 from poker_engine.db.models import Conversation, Game
 from poker_trainer.auth.deps import get_db, require_user
 from poker_engine.db.models import User
@@ -55,6 +60,29 @@ class NewConversationRequest(BaseModel):
     pinned_context: str | None = None  # always-present context block (hand, game summary, etc.)
     entry_point: str = "generic"
     hand_id: uuid.UUID | None = None
+
+
+async def _cached_live_preflop_result(
+    session, snapshot: dict,
+) -> PokerAIQueryResult:
+    """Resolve one live decision once, capped across distinct nodes per hand."""
+    decision_id = str(snapshot.get("decision_id") or "")
+    cached = session.preflop_strategy_cache.get(decision_id)
+    if isinstance(cached, PokerAIQueryResult):
+        return cached
+
+    round_prefix = f"{snapshot.get('round_count')}:preflop:"
+    attempted = sum(
+        isinstance(result, PokerAIQueryResult) and result.attempted
+        for key, result in session.preflop_strategy_cache.items()
+        if str(key).startswith(round_prefix)
+    )
+    if attempted >= PREFLOP_LOOKUP_LIMIT_PER_HAND:
+        result = PokerAIQueryResult(None, "per_hand_limit_reached")
+    else:
+        result = await query_preflop_strategy(snapshot)
+    session.preflop_strategy_cache[decision_id] = result
+    return result
 
 
 def _build_live_equity_context(
@@ -208,13 +236,11 @@ async def coach_chat(
                     round_state, session.hero_uuid,
                 ) if pending_ask is not None else None
                 if preflop_snapshot is not None:
-                    decision_id = preflop_snapshot["decision_id"]
-                    if decision_id not in session.preflop_strategy_cache:
-                        result = await query_preflop_strategy(preflop_snapshot)
-                        session.preflop_strategy_cache[decision_id] = result.evidence
-                    cached_evidence = session.preflop_strategy_cache[decision_id]
-                    if cached_evidence is not None:
-                        apply_pokerai_evidence(preflop_snapshot, cached_evidence)
+                    lookup = await _cached_live_preflop_result(
+                        session, preflop_snapshot,
+                    )
+                    if lookup.evidence is not None:
+                        apply_pokerai_evidence(preflop_snapshot, lookup.evidence)
                     evidence_sources = preflop_snapshot.get("evidence_sources") or []
                     strategy_sources = [
                         source for source in evidence_sources
@@ -227,6 +253,16 @@ async def coach_chat(
                             "\n\nPreflop Strategy Evidence "
                             "(code-resolved; use only within its stated assumptions):\n"
                             + json.dumps(strategy_sources, ensure_ascii=False, indent=2)
+                        )
+                    elif lookup.failure:
+                        table_text += (
+                            "\n\nPreflop Strategy Lookup Status "
+                            "(code-resolved; no strategy evidence is available):\n"
+                            + json.dumps({
+                                "status": "unavailable",
+                                "reason": lookup.failure,
+                                "per_hand_lookup_limit": PREFLOP_LOOKUP_LIMIT_PER_HAND,
+                            }, ensure_ascii=False, indent=2)
                         )
                 live_context = (
                     "Decision Snapshot (authoritative current hand; no future actions or run-out):\n"

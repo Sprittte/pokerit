@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import httpx
 
@@ -21,6 +22,7 @@ def _snapshot(
     position: str = "HJ",
     history: list[dict] | None = None,
     game_format: str = "cash",
+    cards: list[str] | None = None,
 ) -> dict:
     return {
         "decision_id": decision_id,
@@ -32,7 +34,7 @@ def _snapshot(
             "blinds": {"small": 50, "big": 100},
             "ante": {"type": "none", "amount": 0},
             "hero_position": position,
-            "hero_cards": ["Ah", "Kh"],
+            "hero_cards": cards or ["Ah", "Kh"],
             "action_history_before": history or [],
         },
         "derived_calculations": {"hero_stack_bb_at_decision": 100},
@@ -55,6 +57,7 @@ def test_build_request_maps_six_max_hj_to_mp_and_uses_incremental_amounts(monkey
     request = build_preflop_request(snapshot)
 
     assert request["positions"] == {"hero": "MP"}
+    assert request["table_size"] == "6max"
     assert request["hole_cards"] == "AhKh"
     assert request["preflop_actions"] == [
         {"position": "SB", "action": "small blind", "amount": 0.5},
@@ -64,14 +67,26 @@ def test_build_request_maps_six_max_hj_to_mp_and_uses_incremental_amounts(monkey
     assert request["_pokerit"]["observed_raise_sizes_bb"] == [2.5]
 
 
-def test_build_request_fails_closed_for_mtt_and_later_hero_redecision():
+def test_build_request_fails_closed_for_mtt_and_routes_later_hero_redecision():
     assert build_preflop_request(_snapshot(game_format="tournament")) is None
-    assert build_preflop_request(_snapshot(history=[
+    request = build_preflop_request(_snapshot(position="CO", history=[
         {
             "actor": "Hero", "position": "CO", "action": "raise",
             "amount_paid": 250, "amount_to": 250,
         },
-    ])) is None
+        {
+            "actor": "Bot", "position": "SB", "action": "raise",
+            "amount_paid": 700, "amount_to": 750,
+        },
+    ]))
+
+    assert request is not None
+    assert request["preflop_actions"][-2:] == [
+        {"position": "CO", "action": "raise", "amount": 2.5},
+        {"position": "SB", "action": "raise", "amount": 7.0},
+    ]
+    assert request["_pokerit"]["hand_class"] == "AKs"
+    assert request["_pokerit"]["use_range_endpoint"] is True
 
 
 def test_query_returns_sanitized_presolved_reference_and_replaces_local_fallback(monkeypatch):
@@ -79,6 +94,8 @@ def test_query_returns_sanitized_presolved_reference_and_replaces_local_fallback
 
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["Authorization"] == "Bearer test-key"
+        assert request.url.path == "/v1/gto/preflop"
+        assert json.loads(request.content)["hole_cards"] == "AhKh"
         return httpx.Response(200, json={
             "hole_cards": "AhKh",
             "situation": "Raise",
@@ -103,6 +120,7 @@ def test_query_returns_sanitized_presolved_reference_and_replaces_local_fallback
     result = asyncio.run(run())
 
     assert result.failure is None
+    assert result.attempted is True
     assert result.evidence["type"] == "preflop_strategy_api"
     assert result.evidence["match_status"] == "presolved_reference"
     assert result.evidence["strategy"] == [
@@ -114,6 +132,52 @@ def test_query_returns_sanitized_presolved_reference_and_replaces_local_fallback
     assert {source["type"] for source in snapshot["evidence_sources"]} == {
         "heuristic_inference", "preflop_strategy_api",
     }
+
+
+def test_later_hero_redecision_uses_range_endpoint_and_extracts_current_hand(monkeypatch):
+    monkeypatch.setenv("POKERAI_PREFLOP_VERSION", "6max")
+    snapshot = _snapshot(position="UTG", cards=["Ah", "5h"], history=[
+        {
+            "actor": "Hero", "position": "UTG", "action": "raise",
+            "amount_paid": 300, "amount_to": 300,
+        },
+        {
+            "actor": "Bot", "position": "SB", "action": "raise",
+            "amount_paid": 850, "amount_to": 900,
+        },
+    ])
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/gto/preflop/range"
+        body = json.loads(request.content)
+        assert body["table_size"] == "6max"
+        assert "hole_cards" not in body
+        return httpx.Response(200, json={
+            "range": {
+                "A5s": {"fold": 0, "call": 0.74, "raise": 0.26},
+            },
+            "quota": {"used": 3, "limit": 1000},
+        })
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await query_preflop_strategy(
+                snapshot, api_key="test-key", client=client,
+            )
+
+    result = asyncio.run(run())
+
+    assert result.failure is None
+    assert result.attempted is True
+    assert result.evidence["endpoint"] == "/v1/gto/preflop/range"
+    assert result.evidence["node"] == "3-Bet"
+    assert result.evidence["hero_cards"] == "Ah5h"
+    assert result.evidence["strategy"] == [
+        {"action": "fold", "frequency": 0.0},
+        {"action": "call", "frequency": 0.74},
+        {"action": "raise", "frequency": 0.26},
+    ]
+    assert result.evidence["quota_after_query"] == {"used": 3, "limit": 1000}
 
 
 def test_query_rejects_response_for_a_different_node_or_hand():
@@ -139,9 +203,10 @@ def test_query_rejects_response_for_a_different_node_or_hand():
 
     assert result.evidence is None
     assert result.failure == "invalid_response"
+    assert result.attempted is True
 
 
-def test_postgame_query_cap_is_fifteen_and_selects_one_decision_per_hand(monkeypatch):
+def test_postgame_query_cap_is_fifteen_and_selects_two_decisions_per_hand(monkeypatch):
     monkeypatch.setenv("POKERAI_API_KEY", "configured")
     snapshots = []
     for round_count in range(20):
@@ -152,6 +217,11 @@ def test_postgame_query_cap_is_fifteen_and_selects_one_decision_per_hand(monkeyp
         ))
         snapshots.append(_snapshot(
             decision_id=f"{round_count}:preflop:2",
+            round_count=round_count,
+            position="BTN",
+        ))
+        snapshots.append(_snapshot(
+            decision_id=f"{round_count}:preflop:4",
             round_count=round_count,
             position="BTN",
         ))
@@ -171,7 +241,12 @@ def test_postgame_query_cap_is_fifteen_and_selects_one_decision_per_hand(monkeyp
     assert metadata["attempted"] == 15
     assert metadata["resolved"] == 15
     assert len(calls) == 15
-    assert len({call.split(":", 1)[0] for call in calls}) == 15
+    round_counts = {
+        round_id: sum(call.startswith(f"{round_id}:") for call in calls)
+        for round_id in {call.split(":", 1)[0] for call in calls}
+    }
+    assert max(round_counts.values()) == 2
+    assert round_counts["0"] == 2
 
 
 def test_postgame_default_path_disables_retries_and_keeps_strict_request_cap(monkeypatch):

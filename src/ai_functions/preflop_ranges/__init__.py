@@ -9,6 +9,7 @@ from .knowledge import (
     normalize_starting_hand,
 )
 from .pokerai import (
+    PREFLOP_LOOKUP_LIMIT_PER_HAND,
     PokerAIQueryResult,
     apply_pokerai_evidence,
     build_preflop_request,
@@ -25,6 +26,7 @@ __all__ = [
     "get_range_pack",
     "list_range_packs",
     "normalize_starting_hand",
+    "PREFLOP_LOOKUP_LIMIT_PER_HAND",
     "PokerAIQueryResult",
     "apply_pokerai_evidence",
     "build_preflop_request",

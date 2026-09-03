@@ -1,6 +1,6 @@
 # Poker Trainer
 
-Current release: **v0.3.0** — 2026-09-03
+Current release: **v0.3.1** — 2026-09-03
 
 A local-first No-Limit Hold'em training application built with
 [PokerKit](https://github.com/uoftcprg/pokerkit), FastAPI, PostgreSQL, and LLM-
@@ -98,10 +98,12 @@ preflop solve. Its frequencies do not adapt to the observed raise size. Pokerit
 therefore labels successful results as `Preflop strategy API`, records the
 provider/version/node assumptions, and does not present them as a live `Solver
 result`. The live coach queries only when the user asks during a current Hero
-preflop decision. A single-game review selects at most **15** additional
-preflop decisions for PokerAI lookup; other decisions continue to use local
-charts or AI judgment. Use this integration only inside Pokerit's simulated
-training and review workflows, never as assistance at a real-money table.
+preflop decision, caches repeated questions at the same node, and allows at
+most **two distinct Hero decision lookups per hand**. A single-game review
+selects at most **15** additional preflop decisions overall and at most two per
+hand; other decisions continue to use local charts or AI judgment. Use this
+integration only inside Pokerit's simulated training and review workflows,
+never as assistance at a real-money table.
 
 The bundled charts remain available in all cases and are also linked into live
 coaching for matching RFI nodes. They do not contain exact mixed frequencies,
@@ -278,12 +280,13 @@ machines using the same key share that provider account's quota. An optional
 Changes to `.env` take effect when the app and worker containers next start;
 recreate those two services after adding or replacing a key in a running setup.
 
-The integration currently applies only to the first Hero preflop decision in a
-matching 6-max, no-ante cash hand near 100BB. Later Hero re-decisions are not
-rewritten into a different API node. Post-game evaluation makes at most 15
-calls per game and stores only the returned evidence for selected decisions in
-the evaluation snapshot. Never commit a real PokerAI key or distribute the
-provider's solution data.
+The integration applies to matching 6-max, no-ante cash hands near 100BB. It
+uses the single-hand endpoint for Hero's first decision and the whole-range
+endpoint for a later Hero re-decision, then extracts only the current hand's
+frequencies. Live coaching and post-game evaluation each allow at most two
+distinct decision lookups per hand; post-game evaluation also keeps its
+15-call game-level cap. Returned evidence records the endpoint and node used.
+Never commit a real PokerAI key or distribute the provider's solution data.
 
 ### Account preferences
 

@@ -127,4 +127,6 @@ def test_live_preflop_snapshot_links_matching_local_rfi_pack():
 
     assert snapshot["decision_id"] == "3:preflop:2"
     assert later_snapshot["decision_id"] == "3:preflop:4"
-    assert build_preflop_request(later_snapshot) is None
+    request = build_preflop_request(later_snapshot)
+    assert request is not None
+    assert request["_pokerit"]["use_range_endpoint"] is True

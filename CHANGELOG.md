@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-03
+
+### Fixed
+
+- Fixed PokerAI live coaching and game review so a second Hero preflop decision,
+  such as responding after an open is 3-bet, can use the provider's whole-range
+  lookup. Each workflow is capped at two distinct lookups per hand, repeated
+  questions at one live node remain cached, and unavailable lookups retain a
+  diagnostic reason instead of silently losing it.
+
 ## [0.3.0] - 2026-09-03
 
 ### Added
@@ -242,6 +252,7 @@ never have been visible. A downgrade cannot reconstruct those cards.
   the proposed commit.
 - Confirm the tag, attribution, and upstream PR scope.
 
-[Unreleased]: https://github.com/Sprittte/pokerit/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Sprittte/pokerit/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Sprittte/pokerit/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Sprittte/pokerit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Sprittte/pokerit/releases/tag/v0.2.0
