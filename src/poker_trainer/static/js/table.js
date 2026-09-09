@@ -624,10 +624,13 @@
     // End of a street: the bet chips currently shown in front of the players
     // slide into the pot, then the new street's view (with its new card) renders.
     collectBetsThenRender(ev) {
+      const streetMessage = cap(ev.street) + ((ev.rebuys || []).length
+        ? " · " + ev.rebuys.map(r => `${r.name} bought in for ${r.amount}`).join("; ")
+        : "");
       const chips = Array.from(this.$seats.querySelectorAll(".bet-chip"));
       if (!chips.length) {
         if (ev.view) this.render(ev.view);
-        this.setMessage(cap(ev.street));
+        this.setMessage(streetMessage);
         return;
       }
       const SLIDE_MS = 500;
@@ -643,7 +646,7 @@
       // After they land, render the new street (clears the chips, adds the card).
       setTimeout(() => {
         if (ev.view) this.render(ev.view);
-        this.setMessage(cap(ev.street));
+        this.setMessage(streetMessage);
       }, SLIDE_MS + 60);
     }
 

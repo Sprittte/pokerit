@@ -326,8 +326,20 @@ class GameSession:
 
     # -- hand lifecycle ------------------------------------------------------
 
+    def _rebuy_busted_bots(self) -> list[dict]:
+        """Cash-game buy-ins occur between hands, outside hand profit/loss."""
+        if self.config.game_format != "cash" or self._stacks[self.hero_index] <= 0:
+            return []
+        rebuys = []
+        for index, spec in enumerate(self.config.seats):
+            if index != self.hero_index and spec.is_bot and self._stacks[index] == 0:
+                self._stacks[index] = self.config.buy_in
+                rebuys.append({"uuid": self.seat_uuids[index], "name": spec.name, "amount": self.config.buy_in})
+        return rebuys
+
     def _start_hand(self) -> list[dict]:
         """Create a new PokerKit State, deal cards, and advance to first ask."""
+        rebuys = self._rebuy_busted_bots()
         n = len(self.config.seats)
         self._hand_num += 1
         self._action_histories = {s: [] for s in ("preflop", "flop", "turn", "river")}
@@ -414,12 +426,13 @@ class GameSession:
         self.recorder._record_round_start(self._hand_num, self._hero_hole, seats_for_recorder)
 
         self._last_view = self._build_view()
-        out: list[dict] = [{"type": "new_street", "street": "preflop", "view": self._last_view}]
+        out: list[dict] = [{"type": "new_street", "street": "preflop", "view": self._last_view, "rebuys": rebuys}]
         out.extend(self._advance())
         return out
 
     def _start_hand_gen(self):
         """Generator that deals cards, yields the initial preflop view, then advances step by step."""
+        rebuys = self._rebuy_busted_bots()
         n = len(self.config.seats)
         self._hand_num += 1
         self._action_histories = {s: [] for s in ("preflop", "flop", "turn", "river")}
@@ -494,7 +507,7 @@ class GameSession:
 
         # Yield the dealt view immediately so the frontend shows cards before any bot thinks.
         self._last_view = self._build_view()
-        yield [{"type": "new_street", "street": "preflop", "view": self._last_view}]
+        yield [{"type": "new_street", "street": "preflop", "view": self._last_view, "rebuys": rebuys}]
 
         # Now advance step by step (bots highlight one at a time).
         yield from self._advance_gen()
@@ -829,7 +842,10 @@ class GameSession:
         # Check if game is over
         players_with_chips = sum(1 for s in self._stacks if s > 0)
         hero_busted = self._stacks[self.hero_index] == 0
-        if self._hand_num >= self.config.max_round or players_with_chips <= 1 or hero_busted:
+        can_rebuy = self.config.game_format == "cash" and any(
+            spec.is_bot and i != self.hero_index for i, spec in enumerate(self.config.seats)
+        )
+        if self._hand_num >= self.config.max_round or (players_with_chips <= 1 and not can_rebuy) or hero_busted:
             self.finished = True
             final_players = [
                 {"name": self.config.seats[i].name, "stack": self._stacks[i]}

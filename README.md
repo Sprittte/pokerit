@@ -337,6 +337,11 @@ recreated. Do this between games.
 
 ## Data persistence and privacy
 
+- In cash games, busted bots buy in for the configured starting amount before
+  the next hand, maintaining the table size. Hero busting or the hand limit
+  still ends the game; tournament scenarios keep elimination behavior.
+  Buy-ins are fresh capital, not winnings: profit/loss is summed per completed
+  hand. The next-hand table message identifies bots that bought in.
 - Source code lives in the repository directory.
 - PostgreSQL data lives in the Docker volume `pgdata`.
 - Games are created on their first successful save, and every completed hand
