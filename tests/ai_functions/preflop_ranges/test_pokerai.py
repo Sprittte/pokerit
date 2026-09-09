@@ -4,6 +4,7 @@ import asyncio
 import json
 
 import httpx
+import pytest
 
 import ai_functions.preflop_ranges.pokerai as pokerai_module
 from ai_functions.preflop_ranges.pokerai import (
@@ -87,6 +88,40 @@ def test_build_request_fails_closed_for_mtt_and_routes_later_hero_redecision():
     ]
     assert request["_pokerit"]["hand_class"] == "AKs"
     assert request["_pokerit"]["use_range_endpoint"] is True
+
+
+@pytest.mark.parametrize("actions,situation", [
+    (["fold"], "RFI"),
+    (["fold", "fold"], "RFI"),
+    (["call", "fold"], "Limp"),
+    (["fold", "call"], "Limp"),
+    (["call", "raise"], "Raise"),
+])
+def test_query_accepts_matching_node_after_folds_and_calls(actions, situation):
+    history = [
+        {"actor": "Bot", "position": position, "action": action,
+         "amount_paid": 300 if action == "raise" else 100,
+         "amount_to": 300 if action == "raise" else 100}
+        for position, action in zip(("UTG", "MP"), actions)
+    ]
+
+    async def run():
+        async def handler(request):
+            body = json.loads(request.content)
+            assert [a["action"] for a in body["preflop_actions"][2:]] == actions
+            return httpx.Response(200, json={
+                "hole_cards": "AhKh", "situation": situation,
+                "strategy": [{"action": "raise", "frequency": 1}],
+            })
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await query_preflop_strategy(
+                _snapshot(position="CO", history=history),
+                api_key="test-key", client=client,
+            )
+
+    result = asyncio.run(run())
+    assert result.failure is None
+    assert result.evidence["node"] == situation
 
 
 def test_query_returns_sanitized_presolved_reference_and_replaces_local_fallback(monkeypatch):

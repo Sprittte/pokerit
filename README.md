@@ -93,6 +93,9 @@ missing, a request fails, or a spot is unsupported, Pokerit falls back to its
 bundled versioned RFI chart when one matches and otherwise uses clearly labelled
 AI strategy judgment.
 
+Folds before Hero leave an unopened pot classified as RFI; a Limp node requires
+an actual call before any raise.
+
 PokerAI preflop is a millisecond lookup over a fixed presolved pack, not a live
 preflop solve. Its frequencies do not adapt to the observed raise size. Pokerit
 therefore labels successful results as `Preflop strategy API`, records the

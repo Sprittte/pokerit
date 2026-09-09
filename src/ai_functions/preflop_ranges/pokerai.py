@@ -148,8 +148,9 @@ def _expected_situation(request_body: dict[str, Any]) -> str:
         if item.get("action") in _ALLOWED_ACTIONS
     ]
     raises = sum(item.get("action") == "raise" for item in voluntary_actions)
+    has_call = any(item.get("action") == "call" for item in voluntary_actions)
     return (
-        "Limp" if not raises and voluntary_actions else
+        "Limp" if not raises and has_call else
         "RFI" if not raises else
         "Raise" if raises == 1 else
         "3-Bet" if raises == 2 else
