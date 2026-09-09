@@ -342,7 +342,9 @@
     const thresholdMeta = (full.report && full.report.threshold_profile)
       || (full.stats_snapshot && full.stats_snapshot.threshold_profile)
       || {};
-    if (thresholdMeta.key || thresholdMeta.version) {
+    if ((thresholdMeta.key || "").startsWith("custom_")) {
+      html += `<p class="muted">Custom statistics are descriptive; no calibrated statistical leak benchmark is applied.</p>`;
+    } else if (thresholdMeta.key || thresholdMeta.version) {
       html += `<div class="eval-threshold-meta">Leak thresholds: ${thresholdMeta.key || "unknown"} · ${thresholdMeta.version || "unversioned"}</div>`;
     }
     const preflopMeta = (full.report && full.report.preflop_evidence) || {};
@@ -1051,7 +1053,7 @@
         <td>${historyMetricValue(latestNode)}</td>
         <td>${historyMetricValue(baselineNode)}</td>
         <td>${historyMetricValue(rollingNode)}</td>
-        <td>${sample.observed}/${sample.required}</td>
+        <td>${sample.required == null ? sample.observed : `${sample.observed}/${sample.required}`}</td>
         <td class="history-trend ${trend}">${escapeHTML(titleCase(trend.replace(/_/g, " ")))}</td>
       </tr>`;
     }).join("");
@@ -1059,12 +1061,12 @@
     const leakHTML = leaks.length
       ? `<div class="history-numeric-leaks">${leaks.map((leak) =>
           `<span class="eval-tag">${escapeHTML(titleCase(leak.tag.replace(/_/g, " ")))}</span>`).join("")}</div>`
-      : `<p class="muted tiny">No rolling numeric leaks passed both threshold and sample requirements.</p>`;
+      : `<p class="muted tiny">${(full.threshold_profile || "").startsWith("custom_") ? "Custom statistics are descriptive; no calibrated statistical leak benchmark is applied." : "No rolling numeric leaks passed both threshold and sample requirements."}</p>`;
     target.innerHTML = `
       <div class="history-window-meta tiny">
-        Scope: ${escapeHTML(full.scope)} · ${windowMeta.hands_used || 0} rolling hands across ${full.games_included || 0} games ·
+        Scope: ${escapeHTML(full.scope_label || full.scope)} · ${windowMeta.hands_used || 0} rolling hands across ${full.games_included || 0} games ·
         latest game ${windowMeta.latest_game_hands || 0} hands · prior baseline ${windowMeta.prior_baseline_hands || 0} hands ·
-        thresholds ${escapeHTML(full.threshold_profile)} ${escapeHTML(full.threshold_version)}
+        ${(full.threshold_profile || "").startsWith("custom_") ? "Custom scope · descriptive statistics" : `thresholds ${escapeHTML(full.threshold_profile)} ${escapeHTML(full.threshold_version)}`}
       </div>
       <div class="history-report-summary">${escapeHTML((full.report || {}).summary || "")}</div>
       ${leakHTML}

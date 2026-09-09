@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, text
 
 from poker_engine.db.models import EvaluationStatus, GameEvaluation, PlayerProfile
-from poker_engine.scenarios import DEFAULT_PROFILE_SCOPE, profile_scope_for_game
+from poker_engine.scenarios import DEFAULT_PROFILE_SCOPE, is_custom_profile_scope, profile_scope_for_game
 
 
 def _now():
@@ -45,6 +45,8 @@ def query_folded_evaluations(
         evaluation
         for evaluation in db.execute(query).scalars().all()
         if profile_scope_for_game(evaluation.game) == scope_key
+        and (not is_custom_profile_scope(scope_key) or
+             ((evaluation.stats_snapshot or {}).get("threshold_profile") or {}).get("key") == scope_key)
     ]
 
     latest_by_game: dict = {}

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from poker_engine.scenarios import is_custom_profile_scope
+
 THRESHOLD_VERSION = "2026-08-31.v6"
 DEFAULT_THRESHOLD_PROFILE = "cash_6max_100bb"
 
@@ -171,6 +173,8 @@ _PROFILE_ALIASES = {
 
 def get_threshold_profile(profile_key: str | None) -> ThresholdProfile:
     key = _PROFILE_ALIASES.get(profile_key or "", profile_key or DEFAULT_THRESHOLD_PROFILE)
+    if is_custom_profile_scope(key):
+        return ThresholdProfile(key, "2026-09-09.custom.v1", {}, {}, frozenset())
     return THRESHOLD_PROFILES.get(key, THRESHOLD_PROFILES["custom"])
 
 
@@ -178,7 +182,7 @@ def threshold_profile_key_for_game(game) -> str:
     from poker_engine.scenarios import profile_scope_for_game
 
     scenario = getattr(game, "scenario", None)
-    if scenario in THRESHOLD_PROFILES:
+    if scenario in THRESHOLD_PROFILES and scenario != "custom":
         return scenario
     scope = profile_scope_for_game(game)
     return get_threshold_profile(scope).key
@@ -409,4 +413,7 @@ def sample_status(display: dict, profile_key: str | None = None) -> dict:
             segments.sort(key=lambda item: item["table_size"], reverse=True)
             metric["segments"] = segments
         metrics.append(metric)
-    return {"profile": profile.key, "version": profile.version, "metrics": metrics}
+    result = {"profile": profile.key, "version": profile.version, "metrics": metrics}
+    if is_custom_profile_scope(profile.key):
+        result["benchmark_status"] = "unavailable_descriptive_statistics_only"
+    return result

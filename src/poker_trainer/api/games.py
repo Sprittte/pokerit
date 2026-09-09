@@ -19,6 +19,7 @@ from poker_engine.scenarios import (
     SCENARIO_PRESETS,
     get_scenario_preset,
     profile_scope_for_settings,
+    profile_scope_for_game,
 )
 from poker_trainer.auth.deps import get_db, require_user
 from poker_trainer.game.manager import manager
@@ -179,6 +180,9 @@ def create_game(req: CreateGameRequest, hero: User = Depends(require_user)) -> C
         buy_in=settings["buy_in"],
         big_blind=settings["big_blind"],
         scenario=settings["scenario"],
+        num_players=settings["num_bots"] + 1,
+        ante=settings["ante"], ante_type=settings["ante_type"],
+        tournament_stage=settings["tournament_stage"],
     )
     seats = _build_seats(req, hero, settings["num_bots"])
     config = GameConfig(
@@ -287,7 +291,7 @@ def list_games(
                 starting_stack_bb=round(game.buy_in / game.big_blind, 1),
                 ante=game.ante,
                 ante_type=game.ante_type,
-                profile_scope=game.profile_scope,
+                profile_scope=profile_scope_for_game(game),
             )
         )
     return out
@@ -337,7 +341,7 @@ def list_hands(
         "game_format": game.game_format,
         "scenario": game.scenario,
         "tournament_stage": game.tournament_stage,
-        "profile_scope": game.profile_scope,
+        "profile_scope": profile_scope_for_game(game),
         "started_at": game.started_at.isoformat() if game.started_at else None,
         "hands": rows,
     }

@@ -170,6 +170,14 @@ across the web app and worker. Profile reads recompute deterministic state,
 so previously inflated counts no longer appear; an outdated playstyle summary
 is hidden until the next successful profile refresh.
 
+Custom games are grouped by format, starting table size, exact starting stack
+in BB, ante type/size, and tournament-stage setting. Their statistics remain
+descriptive: no calibrated statistical leak threshold is currently applied.
+Existing custom hand histories are grouped from their saved settings without
+rewriting the database. Old mixed-scope reports remain readable, but must be
+re-evaluated before contributing to a new custom profile. The profile selector
+shows each custom group after it has a saved game.
+
 ## Quick start with Docker
 
 ### Prerequisites

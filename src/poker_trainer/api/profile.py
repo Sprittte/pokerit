@@ -12,16 +12,19 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from poker_engine import stats
-from poker_engine.db.models import AccountStatus, PlayerProfile, User
+from poker_engine.db.models import AccountStatus, Game, PlayerProfile, User
 from poker_engine.scenarios import (
     ACTIVE_PROFILE_SCOPE_LABELS,
     DEFAULT_PROFILE_SCOPE,
     LEGACY_PROFILE_SCOPE_LABELS,
-    PROFILE_SCOPE_LABELS,
     profile_scope_label,
+    profile_scope_for_game,
+    custom_profile_label,
+    is_custom_profile_scope,
+    is_profile_scope,
 )
 from poker_trainer.api.auth import serialize_user
 from poker_trainer.auth.deps import get_db, require_user
@@ -35,7 +38,7 @@ _USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{3,40}$")
 
 
 def _validate_profile_scope(scope: str | None) -> str | None:
-    if scope is not None and scope not in PROFILE_SCOPE_LABELS:
+    if scope is not None and not is_profile_scope(scope):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Unknown training profile scope: {scope}",
@@ -160,9 +163,16 @@ def get_coaching_profile(
         **{
             key: label
             for key, label in LEGACY_PROFILE_SCOPE_LABELS.items()
-            if key in existing_legacy_scopes
+            if key in existing_legacy_scopes and key != "custom"
         },
     }
+    games = db.scalars(
+        select(Game).where(Game.hero_user_id == user.id).options(selectinload(Game.players))
+    ).all()
+    for game in games:
+        game_scope = profile_scope_for_game(game)
+        if is_custom_profile_scope(game_scope):
+            visible_labels[game_scope] = custom_profile_label(game)
     scope_options = [
         {"key": key, "label": label}
         for key, label in visible_labels.items()
@@ -171,7 +181,7 @@ def get_coaching_profile(
     if context is None:
         return {
             "scope": scope,
-            "scope_label": profile_scope_label(scope),
+            "scope_label": visible_labels.get(scope, profile_scope_label(scope)),
             "available_scopes": scope_options,
             "evaluations_folded": 0,
             "leaks_by_status": {"flagged": [], "confirmed": [], "resolved": []},
@@ -187,7 +197,7 @@ def get_coaching_profile(
 
     return {
         "scope": scope,
-        "scope_label": profile_scope_label(scope),
+        "scope_label": visible_labels.get(scope, profile_scope_label(scope)),
         "available_scopes": scope_options,
         "evaluations_folded": context["evaluations_folded"],
         "leaks_by_status": leaks_by_status,
