@@ -50,6 +50,11 @@ of already-identified leak tags (each with its severity and citations or \
 evidence already computed). Your job is to write the coaching report.
 
 Rules you MUST follow:
+- Preflop API frequencies describe a fixed pack, not the actual stack depth.
+  Preserve supplied effective-stack comparisons and depth caveats in findings.
+  Directional depth adjustments are AI strategy judgment, not solver output;
+  never invent corrected frequencies or EV errors, or force a bias direction
+  when uncertain. Depth mismatch alone does not establish a mistake.
 - Every numeric claim in your narrative (a percentage, a count, a chip \
 amount) must come directly from the pinned context or from a tool result you \
 obtained in this conversation. Never state a number you did not get from one \

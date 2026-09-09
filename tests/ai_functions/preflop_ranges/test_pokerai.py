@@ -169,6 +169,36 @@ def test_query_returns_sanitized_presolved_reference_and_replaces_local_fallback
     }
 
 
+@pytest.mark.parametrize("depth", [5, 40, 94.85, 200, 1000])
+def test_any_depth_queries_api_and_retains_per_opponent_comparisons(depth):
+    snapshot = _snapshot(position="UTG")
+    snapshot["derived_calculations"]["hero_stack_bb_at_decision"] = depth
+    snapshot["known_facts"]["opponent_stacks"] = [
+        {"position": "BB", "starting_stack_bb": 100},
+        {"position": "SB", "starting_stack_bb": 250},
+    ]
+    async def run():
+        async def handler(request):
+            body = json.loads(request.content)
+            assert "_pokerit" not in body and "opponent_stacks" not in body
+            return httpx.Response(200, json={
+                "hole_cards": "AhKh", "situation": "RFI",
+                "strategy": [{"action": "raise", "frequency": 1}],
+            })
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await query_preflop_strategy(snapshot, client=client, api_key="test-key")
+    result = asyncio.run(run())
+    assert result.attempted and result.failure is None
+    comparison = result.evidence["stack_comparison"]
+    assert comparison["effective_stack_known"]
+    assert comparison["hero_starting_stack_bb"] == depth
+    for row, opponent in zip(comparison["opponents"], [100, 250]):
+        assert row["effective_stack_bb"] == min(depth, opponent)
+        assert row["difference_bb"] == round(min(depth, opponent) - 100, 2)
+        assert row["difference_pct"] == round(min(depth, opponent) - 100, 2)
+    assert result.evidence["strategy"] == [{"action": "raise", "frequency": 1.0}]
+
+
 def test_later_hero_redecision_uses_range_endpoint_and_extracts_current_hand(monkeypatch):
     monkeypatch.setenv("POKERAI_PREFLOP_VERSION", "6max")
     snapshot = _snapshot(position="UTG", cards=["Ah", "5h"], history=[

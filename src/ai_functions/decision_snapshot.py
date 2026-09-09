@@ -170,7 +170,21 @@ def build_live_preflop_snapshot(
         if item.get("actor") == "Hero"
     )
     hero_stack_total = int(hero_seat.get("stack") or 0) + hero_invested
-    hero_stack_bb = round(hero_stack_total / big_blind, 1) if big_blind else 0
+    hero_stack_bb = round(hero_stack_total / big_blind, 2) if big_blind else 0
+    folded = {item.get("uuid") for item in normalized if item.get("canonical_action") == "fold"}
+    opponent_stacks = []
+    for index in active_seats:
+        seat = seats[index]
+        uuid_ = seat.get("uuid")
+        if uuid_ == hero_uuid or uuid_ in folded:
+            continue
+        invested = commitments.get(uuid_, 0) + sum(
+            int(item.get("amount_paid") or 0) for item in normalized if item.get("uuid") == uuid_
+        )
+        opponent_stacks.append({
+            "position": positions.get(uuid_),
+            "starting_stack_bb": round((int(seat.get("stack") or 0) + invested) / big_blind, 2) if big_blind else None,
+        })
     pot = round_state.get("pot") or {}
     snapshot = {
         "schema_version": SCHEMA_VERSION,
@@ -188,6 +202,7 @@ def build_live_preflop_snapshot(
             },
             "hero_position": positions.get(hero_uuid),
             "hero_cards": list(hero_cards),
+            "opponent_stacks": opponent_stacks,
             "board_visible": [],
             "hero_hand": build_hand_facts(hero_cards, []),
             "pot_before_action": (pot.get("main") or {}).get("amount"),
@@ -235,7 +250,15 @@ def build_decision_snapshots(game: Game, hand: Hand, hero_gp_id, street: str) ->
             })
 
         hero_stack_total = (action.get("stack_before") or 0) + (action.get("street_bet") or 0)
-        hero_stack_bb = round(hero_stack_total / game.big_blind, 1) if game.big_blind else 0
+        hero_stack_bb = round(hero_stack_total / game.big_blind, 2) if game.big_blind else 0
+        folded_positions = {item.get("position") for item in action_history if item.get("action") == "fold"}
+        opponent_stacks = [
+            {"position": hp.position,
+             "starting_stack_bb": round(hp.starting_stack / game.big_blind, 2) if hp.starting_stack is not None and game.big_blind else None}
+            for hp in hand.players
+            if hp.game_player_id != hero_gp_id and hp.position not in folded_positions
+            and (hp.starting_stack is None or hp.starting_stack > 0)
+        ] if street == "preflop" else []
         styles = sorted({
             _style_value(gp) for gp in game.players if gp.is_bot and _style_value(gp)
         })
@@ -253,6 +276,7 @@ def build_decision_snapshots(game: Game, hand: Hand, hero_gp_id, street: str) ->
                 "ante": {"type": game.ante_type, "amount": game.ante},
                 "hero_position": hero.get("position"),
                 "hero_cards": hero.get("hole_cards"),
+                "opponent_stacks": opponent_stacks,
                 "board_visible": street_data.get("board") or [],
                 "hero_hand": build_hand_facts(
                     hero.get("hole_cards"), street_data.get("board") or [],

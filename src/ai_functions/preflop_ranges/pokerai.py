@@ -87,7 +87,7 @@ def build_preflop_request(snapshot: dict[str, Any]) -> dict[str, Any] | None:
     if ante.get("type") not in {None, "none"} or float(ante.get("amount") or 0) != 0:
         return None
     hero_stack_bb = float(derived.get("hero_stack_bb_at_decision") or 0)
-    if not 98 <= hero_stack_bb <= 102:
+    if not math.isfinite(hero_stack_bb) or hero_stack_bb <= 0:
         return None
 
     hero_position = _position(facts.get("hero_position"))
@@ -135,6 +135,7 @@ def build_preflop_request(snapshot: dict[str, Any]) -> dict[str, Any] | None:
         "_pokerit": {
             "decision_id": snapshot.get("decision_id"),
             "hero_stack_bb": hero_stack_bb,
+            "opponent_stacks": facts.get("opponent_stacks") or [],
             "hand_class": normalize_starting_hand(hole_cards),
             "use_range_endpoint": hero_acted_before,
             "observed_raise_sizes_bb": observed_raises,
@@ -211,9 +212,25 @@ def _evidence_from_response(
     ):
         return None
     private = request_body.get("_pokerit") or {}
+    version = request_body["preflop_version"]
+    reference_stack = {
+        "6max": 100, "6max_RC_100bb_200NL": 100,
+        "6max_RC_100bb_100NL": 100, "6max_RC_40bb": 40,
+    }.get(version)
+    hero_stack = private.get("hero_stack_bb")
+    comparisons = []
+    for opponent in private.get("opponent_stacks") or []:
+        opponent_stack = opponent.get("starting_stack_bb")
+        effective = min(hero_stack, opponent_stack) if hero_stack is not None and opponent_stack is not None else None
+        comparisons.append({
+            "position": opponent.get("position"), "opponent_starting_stack_bb": opponent_stack,
+            "effective_stack_bb": effective,
+            "difference_bb": round(effective - reference_stack, 2) if effective is not None and reference_stack else None,
+            "difference_pct": round(100 * (effective / reference_stack - 1), 2) if effective is not None and reference_stack else None,
+        })
     evidence = {
         "type": "preflop_strategy_api",
-        "label": "PokerAI presolved 6-max 100BB preflop reference (fixed, sizing-insensitive pack)",
+        "label": f"PokerAI presolved 6-max {reference_stack or 'unknown-depth'}BB preflop reference (fixed pack)",
         "provider": "PokerAI",
         "endpoint": str(private.get("endpoint") or "/v1/gto/preflop"),
         "version": request_body["preflop_version"],
@@ -225,12 +242,21 @@ def _evidence_from_response(
         "observed_raise_sizes_bb": private.get("observed_raise_sizes_bb") or [],
         "solution_assumptions": {
             "table_size": 6,
-            "stack_bb": 100,
+            "stack_bb": reference_stack,
             "open_to_bb": 3,
             "three_bet_to_bb": 9,
             "four_bet_to_bb": 25,
             "five_bet_to_bb": 100,
             "frequencies_change_with_observed_sizing": False,
+            "frequencies_change_with_actual_stack": False,
+        },
+        "stack_comparison": {
+            "basis": "start-of-hand stacks, including chips already committed; opponents not yet folded",
+            "reference_stack_bb": reference_stack,
+            "hero_starting_stack_bb": hero_stack,
+            "opponents": comparisons,
+            "effective_stack_known": bool(comparisons) and all(row["effective_stack_bb"] is not None for row in comparisons),
+            "interpretation": "Fixed-pack frequencies only. Depth effects require AI strategy judgment, not a computed EV error.",
         },
         "match_status": "presolved_reference",
         "retrieved_at": datetime.now(timezone.utc).isoformat(),

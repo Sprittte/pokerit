@@ -66,7 +66,14 @@ Rules you MUST follow:
   or EV are forbidden unless a `solver_node` evidence source is present.
   Frequencies supplied by `preflop_strategy_api` may be quoted only as a
   presolved fixed-pack reference; never call that source a live solver result
-  or imply that its frequencies adapt to the observed raise size.
+  or imply that its frequencies adapt to the observed raise size or actual stacks.
+  Use stack_comparison to state actual effective depths versus the reference and
+  the supplied differences. Qualitatively explain possible over/underweighting
+  as AI strategy judgment, conditional on the hand and action line; acknowledge
+  uncertainty when no direction is defensible. Never invent adjusted frequencies
+  or EV error. Missing opponent stacks mean effective depth is unknown. A depth
+  mismatch alone is not a leak, and reference frequencies alone do not establish
+  a mistake at a different depth.
 - The snapshot's `known_facts.hero_hand`, canonical actions, and payment fields
   are authoritative. Never reinterpret `check` as call or the first postflop
   `bet` as a raise.

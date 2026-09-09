@@ -66,6 +66,10 @@ def test_snapshot_clips_future_action_and_labels_bot_style_as_metadata(db_sessio
 
     assert snapshot["schema_version"] == "decision_snapshot.v2"
     assert snapshot["known_facts"]["action_history_before"] == []
+    # A later fold must not hide the opponent from this earlier decision.
+    assert snapshot["known_facts"]["opponent_stacks"] == [
+        {"position": "BB", "starting_stack_bb": 100.0},
+    ]
     assert snapshot["known_facts"]["hero_action"] == {
         "action": "raise", "raw_action": "raise",
         "amount_paid": 200, "amount_to": 200, "all_in": False,
@@ -111,6 +115,7 @@ def test_live_preflop_snapshot_links_matching_local_rfi_pack():
 
     assert snapshot["known_facts"]["hero_position"] == "CO"
     assert snapshot["derived_calculations"]["hero_stack_bb_at_decision"] == 100
+    assert {o["position"] for o in snapshot["known_facts"]["opponent_stacks"]} == {"BTN", "SB", "BB"}
     source = next(
         item for item in snapshot["evidence_sources"]
         if item["type"] == "range_knowledge_base"
@@ -119,6 +124,7 @@ def test_live_preflop_snapshot_links_matching_local_rfi_pack():
     assert source["exact_frequencies_available"] is False
 
     round_state["seats"][5]["stack"] = 9700
+    round_state["seats"][0]["stack"] = 19100
     round_state["action_histories"]["preflop"].extend([
         {"uuid": "hero", "action": "RAISE", "amount": 300, "stack_after": 9700},
         {"uuid": "p0", "action": "RAISE", "amount": 900, "stack_after": 9100},
@@ -130,3 +136,4 @@ def test_live_preflop_snapshot_links_matching_local_rfi_pack():
     request = build_preflop_request(later_snapshot)
     assert request is not None
     assert request["_pokerit"]["use_range_endpoint"] is True
+    assert next(o for o in later_snapshot["known_facts"]["opponent_stacks"] if o["position"] == "BTN")["starting_stack_bb"] == 200.0

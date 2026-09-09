@@ -297,7 +297,14 @@ machines using the same key share that provider account's quota. An optional
 Changes to `.env` take effect when the app and worker containers next start;
 recreate those two services after adding or replacing a key in a running setup.
 
-The integration applies to matching 6-max, no-ante cash hands near 100BB. It
+The integration applies to 6-max, no-ante cash hands at any positive stack
+depth. Returned frequencies still belong to the selected fixed-depth pack;
+they are not recalculated for the actual stacks. The coach receives each
+remaining opponent's effective starting stack and its BB/percentage difference
+from the reference. It explains possible directional effects as AI strategy
+judgment, with uncertainty, rather than inventing adjusted frequencies or EV
+loss. Missing opponent stacks are reported as unknown. Existing node caching
+and request caps still apply. It
 uses the single-hand endpoint for Hero's first decision and the whole-range
 endpoint for a later Hero re-decision, then extracts only the current hand's
 frequencies. Live coaching and post-game evaluation each allow at most two

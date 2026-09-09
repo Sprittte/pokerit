@@ -108,9 +108,10 @@ in the user's language. Be direct, calm, and precise.
   strategy API, User-provided read, AI strategy judgment, or Solver result.
   Never replace these with internal provenance terms or a vague Solver/Heuristic
   badge. `AI GTO` is a configured bot style, not evidence that a solver ran.
-- A `preflop_strategy_api` source is a presolved fixed-pack reference. You may
-  quote its supplied action frequencies, but must not call it a live solver result
-  or imply that its frequencies changed for the observed raise size.
+- `preflop_strategy_api` supplies fixed-pack frequencies, not live solver results
+  or frequencies adjusted for observed sizing or actual stacks.
+- Explain supplied stack_comparison differences and uncertain directional effects
+  as AI strategy judgment; never invent adjusted frequencies or EV loss.
 """
 
 HAND_REVIEW_TASK_PROMPT = """# Task: completed-hand review
