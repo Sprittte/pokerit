@@ -39,7 +39,7 @@ from ai_functions.preflop_ranges import (
     apply_pokerai_evidence,
     query_preflop_strategy,
 )
-from poker_engine.db.models import Conversation, Game
+from poker_engine.db.models import Conversation, Game, Hand
 from poker_trainer.auth.deps import get_db, require_user
 from poker_engine.db.models import User
 from poker_trainer.game.manager import manager
@@ -60,6 +60,29 @@ class NewConversationRequest(BaseModel):
     pinned_context: str | None = None  # always-present context block (hand, game summary, etc.)
     entry_point: str = "generic"
     hand_id: uuid.UUID | None = None
+
+
+def _require_owned_context(db: Session, user: User, game_id=None, hand_id=None, conversation_id=None) -> None:
+    """Authorize before creating a conversation or reading live/private context."""
+    if conversation_id is not None:
+        conv = db.get(Conversation, conversation_id)
+        if conv is None or conv.user_id != user.id:
+            raise HTTPException(404, "Conversation not found.")
+    if game_id is not None:
+        live = manager.get(str(game_id))
+        if live is not None:
+            if manager.get_owned(str(game_id), user.id) is None:
+                raise HTTPException(404, "Game not found.")
+        else:
+            game = db.get(Game, game_id)
+            if game is None or game.hero_user_id != user.id:
+                raise HTTPException(404, "Game not found.")
+    if hand_id is not None:
+        hand = db.get(Hand, hand_id)
+        if hand is None or hand.game.hero_user_id != user.id:
+            raise HTTPException(404, "Hand not found.")
+        if game_id is not None and str(hand.game_id) != str(game_id):
+            raise HTTPException(404, "Hand not found.")
 
 
 async def _cached_live_preflop_result(
@@ -115,6 +138,7 @@ def create_conversation(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    _require_owned_context(db, user, body.game_id, body.hand_id)
     conv = get_or_create_conversation(
         db,
         user_id=user.id,
@@ -198,6 +222,8 @@ async def coach_chat(
     if not body.message.strip():
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Message cannot be empty")
 
+    _require_owned_context(db, user, body.game_id, conversation_id=body.conversation_id)
+
     conv = get_or_create_conversation(
         db,
         user_id=user.id,
@@ -211,7 +237,7 @@ async def coach_chat(
     evidence_sources: list[dict] | None = None
     equity_context: dict | None = None
     if body.game_id is not None:
-        session = manager.get(str(body.game_id))
+        session = manager.get_owned(str(body.game_id), user.id)
         if session is not None:
             scenario_context = build_scenario_context(session.config)
             round_state = session.current_round_state(for_coach=True)

@@ -208,10 +208,11 @@ def _terminal_statuses(
 
 
 class GameSession:
-    def __init__(self, config: GameConfig, hero_index: int = 0, seed: int | None = None):
+    def __init__(self, config: GameConfig, hero_index: int = 0, seed: int | None = None, *, owner_user_id=None):
         config.validate()
         self.config = config
         self.game_id = str(uuidlib.uuid4())
+        self.owner_user_id = owner_user_id
         self.hero_index = hero_index
         self.seed = seed
         self._rng = random.Random(seed)

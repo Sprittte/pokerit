@@ -319,6 +319,12 @@ hand history even if that hand was mucked at the live table.
 
 Legacy per-game API overrides remain accepted.
 
+Live WebSocket play and live-coach requests require the game owner's signed-in
+account. Browser WebSocket connections also validate the configured application
+origin. New Compose containers publish the app, PostgreSQL and pgAdmin on
+`127.0.0.1` only; an existing container keeps its old port binding until it is
+recreated. Do this between games.
+
 ## Data persistence and privacy
 
 - Source code lives in the repository directory.

@@ -678,7 +678,8 @@ def get_or_create_conversation(
 
     from poker_engine.db.models import Game
     verified_game_id = None
-    if game_id is not None and db.get(Game, game_id) is not None:
+    game = db.get(Game, game_id) if game_id is not None else None
+    if game is not None and game.hero_user_id == user_id:
         verified_game_id = game_id
 
     conv = Conversation(

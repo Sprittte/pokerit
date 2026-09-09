@@ -5,11 +5,15 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+from urllib.parse import urlsplit
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from poker_engine import stats as stats_engine
 from poker_engine.db.base import SessionLocal
+from poker_engine.db.models import User
+from poker_trainer.auth.config import APP_BASE_URL
+from poker_trainer.auth.deps import websocket_user
 from poker_trainer.game.manager import manager
 
 router = APIRouter()
@@ -55,13 +59,17 @@ def _save_soft(session) -> dict | None:
 
 
 @router.websocket("/ws/games/{game_id}")
-async def play(websocket: WebSocket, game_id: str) -> None:
-    await websocket.accept()
-    session = manager.get(game_id)
-    if session is None:
-        await websocket.send_json({"type": "error", "message": "Game not found."})
-        await websocket.close()
+async def play(websocket: WebSocket, game_id: str, user: User | None = Depends(websocket_user)) -> None:
+    origin = websocket.headers.get("origin")
+    expected = urlsplit(APP_BASE_URL)
+    if origin is not None and origin.rstrip("/") != f"{expected.scheme}://{expected.netloc}":
+        await websocket.close(code=1008)
         return
+    session = manager.get_owned(game_id, user.id) if user is not None else None
+    if session is None:
+        await websocket.close(code=1008)
+        return
+    await websocket.accept()
 
     lock = manager.lock(game_id)
 

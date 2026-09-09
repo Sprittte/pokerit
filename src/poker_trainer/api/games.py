@@ -215,7 +215,7 @@ def create_game(req: CreateGameRequest, hero: User = Depends(require_user)) -> C
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
-    session = GameSession(config, hero_index=0, seed=req.seed)
+    session = GameSession(config, hero_index=0, seed=req.seed, owner_user_id=hero.id)
     session.preflop_quick = preflop
     session.postflop_quick = postflop
     session.showdown_visibility = showdown_visibility_from_preferences(hero.preferences)
