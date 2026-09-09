@@ -309,9 +309,13 @@ Legacy per-game API overrides remain accepted.
 
 - Source code lives in the repository directory.
 - PostgreSQL data lives in the Docker volume `pgdata`.
-- Games are created in the database at session start, and every completed hand
-  is flushed incrementally. A service interruption can lose the hand currently
-  in progress, but already completed hands remain stored.
+- Games are created on their first successful save, and every completed hand
+  is flushed incrementally. A failed transaction leaves completed hands eligible
+  for retry; retrying also reconciles a commit whose acknowledgement was lost.
+- If saving fails, the table exposes **Retry save**. A final-save failure keeps
+  the finished session in memory until saving succeeds. Keep the page/app open
+  and retry before restarting: this retry buffer does not survive an app restart.
+  Successfully committed hands remain stored.
 - Normal restarts, Mac sleep/wake, and `docker compose down` do not remove the
   database volume.
 - The browser receives only the hero's cards and opponent cards allowed by the

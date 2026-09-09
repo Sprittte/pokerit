@@ -39,6 +39,7 @@ def _save_soft(session) -> dict | None:
     try:
         with SessionLocal() as db:
             game = session.persist_incremental(db)
+            session.save_failed = False
             hero = next(
                 (gp for gp in game.players if not gp.is_bot and gp.user_id is not None),
                 None,
@@ -48,6 +49,7 @@ def _save_soft(session) -> dict | None:
             counts = stats_engine.compute_game_stats(db, game.id, hero.id)
             return stats_engine.to_display(counts)
     except Exception:
+        session.save_failed = True
         log.exception("incremental save failed for game %s", getattr(session, "game_id", "?"))
         return None
 
@@ -93,16 +95,22 @@ async def play(websocket: WebSocket, game_id: str) -> None:
                 })
                 hand_ended = False
             if hand_ended:
-                hero_stats = _save_soft(session)
-                if hero_stats is not None:
-                    await websocket.send_json({"type": "stats_update", "stats": hero_stats})
+                await _save_and_notify(websocket, session)
             if session.finished:
-                await _finish(websocket, session, game_id)
-                return
+                if await _finish(websocket, session, game_id):
+                    return
 
         while True:
             msg = await websocket.receive_json()
             message_type = msg.get("type")
+            if message_type == "retry_save":
+                async with lock:
+                    if session.finished:
+                        if await _finish(websocket, session, game_id):
+                            break
+                    else:
+                        await _save_and_notify(websocket, session)
+                continue
             if message_type == "end_game":
                 async with lock:
                     if session.finished:
@@ -116,8 +124,10 @@ async def play(websocket: WebSocket, game_id: str) -> None:
                             "reason": "ended_by_player",
                         },
                     })
-                    await _finish(websocket, session, game_id)
-                break
+                    saved = await _finish(websocket, session, game_id)
+                if saved:
+                    break
+                continue
             if message_type != "action":
                 continue
             action = msg.get("action", "call")
@@ -131,12 +141,10 @@ async def play(websocket: WebSocket, game_id: str) -> None:
                 )
                 hand_ended = await _stream_gen(websocket, gen)
                 if hand_ended:
-                    hero_stats = _save_soft(session)
-                    if hero_stats is not None:
-                        await websocket.send_json({"type": "stats_update", "stats": hero_stats})
+                    await _save_and_notify(websocket, session)
                 if session.finished:
-                    await _finish(websocket, session, game_id)
-                    break
+                    if await _finish(websocket, session, game_id):
+                        break
     except WebSocketDisconnect:
         # Leave the session in memory so the client can reconnect and resume.
         # Completed hands are already saved by the per-hand hook above.
@@ -200,14 +208,35 @@ async def _stream_gen(websocket: WebSocket, gen) -> bool:
     return hand_ended
 
 
-async def _finish(websocket: WebSocket, session, game_id: str) -> None:
+async def _save_and_notify(websocket: WebSocket, session) -> None:
+    hero_stats = _save_soft(session)
+    if getattr(session, "save_failed", False):
+        await websocket.send_json({
+            "type": "persist_error", "finished": session.finished,
+            "message": "Saving failed. Completed hands are buffered; retry saving before closing the game.",
+        })
+    else:
+        await websocket.send_json({"type": "save_status", "saved": True})
+        if hero_stats is not None:
+            await websocket.send_json({"type": "stats_update", "stats": hero_stats})
+
+
+async def _finish(websocket: WebSocket, session, game_id: str) -> bool:
     """Persist the finished game and tell the client, then clean up."""
     game_id_db = None
     try:
         with SessionLocal() as db:
             game = session.persist(db)
-            game_id_db = str(game.id) if game is not None else None
-    except Exception as exc:  # persistence must not crash the socket
-        await websocket.send_json({"type": "persist_error", "message": str(exc)})
+            if game is None:
+                raise RuntimeError("No persisted game returned")
+            game_id_db = str(game.id)
+    except Exception:  # Keep the finished session available for retry/reconnect.
+        log.exception("final save failed for game %s", game_id)
+        await websocket.send_json({
+            "type": "persist_error", "finished": True,
+            "message": "Game ended, but saving failed. Retry saving before closing the game.",
+        })
+        return False
     await websocket.send_json({"type": "saved", "db_game_id": game_id_db})
     manager.remove(game_id)
+    return True

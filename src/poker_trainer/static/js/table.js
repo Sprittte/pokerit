@@ -316,6 +316,17 @@
     }
 
     endGame() {
+      if (this.saveFailed) {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+          this.setMessage("Reconnecting to retry saving…");
+          this.connect();
+          return;
+        }
+        this.$endGame.disabled = true;
+        this.setMessage("Retrying save…");
+        this.ws.send(JSON.stringify({ type: "retry_save" }));
+        return;
+      }
       if (this.gameFinished || this.$endGame.disabled) return;
       const confirmed = window.confirm(
         "End this game now? Completed hands will be saved; the current unfinished hand will not count."
@@ -354,12 +365,32 @@
         return;
       }
       if (msg.type === "saved") {
+        this.saveFailed = false;
         this.gameFinished = true;
         this.$endGame.disabled = true;
         this.$endGame.textContent = "Game ended";
         sessionStorage.removeItem("pt_ws_" + this.gameId);
-        this.setMessage("Game over. Result saved" + (msg.db_game_id ? "." : " (not persisted)."));
+        this.setMessage("Game over. Result saved.");
         this.disableControls();
+        return;
+      }
+      if (msg.type === "persist_error") {
+        this.saveFailed = true;
+        if (msg.finished) {
+          this.gameFinished = true;
+          this.disableControls();
+        }
+        this.$endGame.disabled = false;
+        this.$endGame.textContent = "Retry save";
+        this.setMessage(msg.message);
+        return;
+      }
+      if (msg.type === "save_status" && msg.saved) {
+        const wasRetrying = this.saveFailed;
+        this.saveFailed = false;
+        this.$endGame.disabled = Boolean(this.gameFinished);
+        this.$endGame.textContent = this.gameFinished ? "Game ended" : "End game";
+        if (wasRetrying) this.setMessage("Completed hands saved.");
         return;
       }
       if (msg.type === "error") this.setMessage(msg.message);
