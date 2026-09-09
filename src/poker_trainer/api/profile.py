@@ -27,7 +27,7 @@ from poker_trainer.api.auth import serialize_user
 from poker_trainer.auth.deps import get_db, require_user
 from poker_trainer.preferences import merge_preferences
 
-from ai_functions.memory.persistence import build_profile_context, load_profile_row, rebuild_and_persist
+from ai_functions.memory.persistence import build_profile_context, rebuild_and_persist
 
 router = APIRouter(prefix="/api/profile", tags=["profile"])
 
@@ -145,7 +145,6 @@ def get_coaching_profile(
     trends, playstyle summary, and how many evaluations are folded in.
     """
     _validate_profile_scope(scope)
-    row = load_profile_row(db, user.id, scope)
     existing_legacy_scopes = set(
         db.execute(
             select(PlayerProfile.scope_key).where(
@@ -168,7 +167,8 @@ def get_coaching_profile(
         {"key": key, "label": label}
         for key, label in visible_labels.items()
     ]
-    if row is None:
+    context = build_profile_context(db, user.id, scope)
+    if context is None:
         return {
             "scope": scope,
             "scope_label": profile_scope_label(scope),
@@ -179,9 +179,8 @@ def get_coaching_profile(
             "playstyle_summary": "",
         }
 
-    context = build_profile_context(db, user.id, scope) or {"trends": {}}
     leaks_by_status = {"flagged": [], "confirmed": [], "resolved": []}
-    for leak in row.leaks:
+    for leak in context["leaks"]:
         bucket = leaks_by_status.get(leak.get("status"))
         if bucket is not None:
             bucket.append(leak)
@@ -190,10 +189,10 @@ def get_coaching_profile(
         "scope": scope,
         "scope_label": profile_scope_label(scope),
         "available_scopes": scope_options,
-        "evaluations_folded": row.evaluations_folded,
+        "evaluations_folded": context["evaluations_folded"],
         "leaks_by_status": leaks_by_status,
         "trends": context.get("trends", {}),
-        "playstyle_summary": row.playstyle_summary or "",
+        "playstyle_summary": context["playstyle_summary"] or "",
     }
 
 

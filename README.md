@@ -164,6 +164,12 @@ discard, restore, dispute, regression, and reset workflows. Cash, MTT, table
 size, and stack-depth profiles remain isolated; legacy 6-max MTT history is not
 silently reclassified as new 8-max data.
 
+Re-evaluating one game replaces its older eligible evaluation in the profile;
+it never counts as another independent game. Profile updates are serialized
+across the web app and worker. Profile reads recompute deterministic state,
+so previously inflated counts no longer appear; an outdated playstyle summary
+is hidden until the next successful profile refresh.
+
 ## Quick start with Docker
 
 ### Prerequisites
